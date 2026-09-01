@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.4.0</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.0</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -22,6 +22,7 @@
 
     <main class="app-shell">
       <aside class="panel controls-panel">
+        <div class="target-heading"><span>Target 1</span><strong>上传图片与生成设置</strong></div>
         <section class="step-card">
           <div class="step-heading"><span class="step-number">1</span><h2>上传图片</h2></div>
           <label id="dropZone" class="drop-zone" for="imageInput">
@@ -39,7 +40,7 @@
             </div>
           </div>
           <div id="qualityInfo" class="quality-info hidden"></div>
-          <label class="select-field precision-field"><span>自动生成精度（按原图比例）</span><select id="precisionSelect" disabled><option>上传图片后自动计算</option></select></label>
+          <label class="select-field precision-field"><span>自动生成精度（原图比例 + MARD 色数）</span><select id="precisionSelect" disabled><option>上传图片后自动计算</option></select></label>
           <button id="bigjpgButton" class="button button-outline bigjpg-button" type="button" disabled>图片太小？去 Bigjpg 高清化</button>
           <p class="hint">高清化后请下载结果，再重新上传到这里。Bigjpg 处理不会自动上传你的图片。</p>
           <label class="check-row">
@@ -50,18 +51,21 @@
         </section>
 
         <section class="step-card">
-        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">LAB 聚类 + MARD 280 全色卡</span></div>
-        <div class="field-row">
-            <label class="field"><span>颜色数 <small>6–48</small></span><div class="range-line"><input id="colorCount" type="range" min="6" max="48" value="24" /><output id="colorCountValue">24</output></div></label>
-          </div>
+        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD 280 标准色卡</span></div>
+        <label class="select-field"><span>使用 MARD 色数 <small>标准色卡档位</small></span><select id="colorCount">
+          <option value="24">24 色 · 基础精度</option>
+          <option value="48">48 色 · 细节增强</option>
+          <option value="72">72 色 · 中等精度</option>
+          <option value="96">96 色 · 高清</option>
+          <option value="120">120 色 · 高精度</option>
+          <option value="144">144 色 · 超清</option>
+          <option value="216">216 色 · 极高精度</option>
+          <option value="264">264 色 · MARD 高精度全色档</option>
+        </select></label>
           <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
-          <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 280 色</strong><small>编辑/购买用 · 每格对应 MARD 色号</small></span></label>
+          <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 标准色卡</strong><small>内置 280 色 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
-          <p class="hint palette-note">始终使用完整 MARD 280 色卡，提高细节和原图相似度。</p>
-          <label class="palette-import"><span>MARD 色卡刻度</span><span class="import-control"><input id="mardReferenceInput" type="file" accept="image/png,image/jpeg,image/webp" />上传色卡图片校准</span></label>
-          <p id="mardReferenceStatus" class="hint">可上传 MARD 基础色图片；校准后请重新提取主色。</p>
-          <label class="palette-import"><span>色卡数据</span><span class="import-control"><input id="paletteInput" type="file" accept=".json,.csv,text/csv,application/json" />导入我的 MARD 280 色卡</span></label>
-          <p id="paletteStatus" class="hint">内置公开参考版 MARD 280 色，可用 CSV/JSON 替换为你的实物色卡。</p>
+          <p class="hint palette-note">提取主色会直接按内置 MARD 280 标准色卡匹配；颜色数越多，过渡越细、材料种类也越多。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
           <div id="extractedColors" class="swatch-list"></div>
         </section>
@@ -90,21 +94,10 @@
         </section>
       </aside>
 
-      <section class="workspace">
-        <div class="workspace-toolbar">
-          <div class="workspace-status"><span><span class="live-dot"></span><span id="statusText">等待上传图片</span></span><span class="toolbar-actions"><button id="toggleControls" class="toolbar-button" type="button" aria-expanded="true">隐藏设置</button><button id="toggleResults" class="toolbar-button" type="button" aria-expanded="true">隐藏结果</button><button id="fitPattern" class="toolbar-button" type="button">适应窗口</button></span></div>
-          <div class="zoom-control"><span>缩放</span><input id="zoom" type="range" min="10" max="150" value="90" /><output id="zoomValue">90%</output></div>
-        </div>
-        <div id="canvasViewport" class="canvas-viewport">
-          <div id="emptyState" class="empty-state"><div class="empty-mark">✦</div><h2>你的拼豆图纸会出现在这里</h2><p>先从左侧上传一张图片</p></div>
-          <canvas id="patternCanvas" class="hidden" aria-label="拼豆图纸预览"></canvas>
-        </div>
-        <div class="canvas-caption"><span>网格预览</span><span id="canvasMeta">—</span></div>
-      </section>
-
       <aside class="panel results-panel">
+        <div class="target-heading"><span>Target 2</span><strong>颜色图例与材料清单</strong></div>
         <section class="result-section">
-          <div class="result-heading"><h2>颜色图例</h2><span id="modeBadge" class="badge">MARD 280 色</span></div>
+          <div class="result-heading"><h2>颜色图例</h2><span id="modeBadge" class="badge">MARD 标准色卡</span></div>
           <div id="legend" class="legend-list"><div class="empty-result">生成图解后显示颜色图例</div></div>
         </section>
         <section class="result-section materials-section">
@@ -114,6 +107,19 @@
         </section>
         <section class="tips-section"><strong>使用提示</strong><p>图纸生成完全在本地浏览器内完成，图片不会上传服务器。PDF 是单页大画布，下载后放大即可查看色号；若要实体打印，请按纸张大小选择“适应页面”或使用更大纸张。</p></section>
       </aside>
+
+      <section class="workspace">
+        <div class="target-heading"><span>Target 3</span><strong>拼豆图纸</strong></div>
+        <div class="workspace-toolbar">
+          <div class="workspace-status"><span><span class="live-dot"></span><span id="statusText">等待上传图片</span></span><span class="toolbar-actions"><button id="toggleControls" class="toolbar-button" type="button" aria-expanded="true">隐藏设置</button><button id="toggleResults" class="toolbar-button" type="button" aria-expanded="true">隐藏结果</button><button id="fitPattern" class="toolbar-button" type="button">适应窗口</button></span></div>
+          <div class="zoom-control"><span>缩放</span><input id="zoom" type="range" min="10" max="150" value="90" /><output id="zoomValue">90%</output></div>
+        </div>
+        <div id="canvasViewport" class="canvas-viewport">
+          <div id="emptyState" class="empty-state"><div class="empty-mark">✦</div><h2>你的拼豆图纸会出现在这里</h2><p>先从上方上传一张图片</p></div>
+          <canvas id="patternCanvas" class="hidden" aria-label="拼豆图纸预览"></canvas>
+        </div>
+        <div class="canvas-caption"><span>网格预览</span><span id="canvasMeta">—</span></div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status"></div>
