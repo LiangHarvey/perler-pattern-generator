@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.2</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.3</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -87,7 +87,7 @@
           <div class="segmented"><label><input type="radio" name="edgeMode" value="auto" checked /><span>自动</span></label><label><input type="radio" name="edgeMode" value="sharp" /><span>锐利</span></label><label><input type="radio" name="edgeMode" value="smooth" /><span>平滑</span></label></div>
           <p class="hint">自动模式在保留轮廓和减少颜色跳变之间取平衡；锐利模式更适合人物和线稿。</p>
           <button id="generatePattern" class="button button-orange" type="button" disabled>生成拼豆图解</button>
-          <div class="legend-note">每格保留 MARD 色号；网页全图适应窗口时字会变小，请用缩放条或双指放大查看。PNG 与 PDF 使用更大的格子和清晰字形；PDF 为单页整图，页面尺寸按图纸自动生成。</div>
+          <div class="legend-note">每格保留 MARD 色号；图纸四边显示从 1 开始的行列坐标。网页全图适应窗口时字会变小，请用缩放条或双指放大查看。PNG 与 PDF 使用更大的格子和清晰字形；PDF 为单页整图，页面尺寸按图纸自动生成。</div>
         </section>
 
         <section class="step-card material-input-card">
@@ -128,7 +128,7 @@
           <div id="emptyState" class="empty-state"><div class="empty-mark">✦</div><h2>你的拼豆图纸会出现在这里</h2><p>先从上方上传一张图片</p></div>
           <canvas id="patternCanvas" class="hidden" aria-label="拼豆图纸预览"></canvas>
         </div>
-        <div class="canvas-caption"><span>网格预览</span><span id="canvasMeta">—</span></div>
+        <div class="canvas-caption"><span>网格预览（四边坐标）</span><span id="canvasMeta">—</span></div>
       </section>
     </main>
 

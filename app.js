@@ -665,23 +665,27 @@
 
   function patternCanvasLayout(cellSize) {
     const { width, height } = state;
-    const axisFontSize = Math.max(6, Math.min(12, Math.round(cellSize * .52)));
+    const axisFontSize = Math.max(8, Math.min(16, Math.round(cellSize * .62)));
     const outerBorder = Math.max(8, Math.round(cellSize * .65));
-    const leftAxis = Math.max(30, Math.ceil(axisFontSize * 3.8));
-    const topAxis = Math.max(26, Math.ceil(axisFontSize * 1.9));
+    const leftAxis = Math.max(34, Math.ceil(axisFontSize * 4));
+    const rightAxis = leftAxis;
+    const topAxis = Math.max(30, Math.ceil(axisFontSize * 2.2));
+    const bottomAxis = topAxis;
     const originX = outerBorder + leftAxis;
     const originY = outerBorder + topAxis;
     return {
       axisFontSize,
       outerBorder,
       leftAxis,
+      rightAxis,
       topAxis,
+      bottomAxis,
       originX,
       originY,
       gridWidth: width * cellSize,
       gridHeight: height * cellSize,
-      canvasWidth: originX + width * cellSize + outerBorder,
-      canvasHeight: originY + height * cellSize + outerBorder
+      canvasWidth: originX + width * cellSize + rightAxis + outerBorder,
+      canvasHeight: originY + height * cellSize + bottomAxis + outerBorder
     };
   }
 
@@ -701,24 +705,34 @@
     context.lineWidth = 1;
     context.strokeRect(layout.outerBorder + .5, layout.outerBorder + .5, layout.canvasWidth - layout.outerBorder * 2 - 1, layout.canvasHeight - layout.outerBorder * 2 - 1);
 
-    // Every column and row receives a 1-based coordinate, matching the grid.
-    context.fillStyle = "#5e594f";
-    context.font = `600 ${layout.axisFontSize}px Arial, "Microsoft YaHei", sans-serif`;
+    // Every column and row receives a 1-based coordinate on all four sides.
+    context.fillStyle = "#2f2c27";
+    context.font = `700 ${layout.axisFontSize}px Arial, "Microsoft YaHei", sans-serif`;
     context.textAlign = "center";
     context.textBaseline = "middle";
     for (let column = 0; column < width; column++) {
-      context.fillText(String(column + 1), layout.originX + column * cellSize + cellSize / 2, layout.outerBorder + layout.topAxis / 2);
+      const label = String(column + 1);
+      const x = layout.originX + column * cellSize + cellSize / 2;
+      context.fillText(label, x, layout.outerBorder + layout.topAxis / 2);
+      context.fillText(label, x, layout.originY + layout.gridHeight + layout.bottomAxis / 2);
     }
     for (let row = 0; row < height; row++) {
-      context.fillText(String(row + 1), layout.outerBorder + layout.leftAxis / 2, layout.originY + row * cellSize + cellSize / 2);
+      const label = String(row + 1);
+      const y = layout.originY + row * cellSize + cellSize / 2;
+      context.fillText(label, layout.outerBorder + layout.leftAxis / 2, y);
+      context.fillText(label, layout.originX + layout.gridWidth + layout.rightAxis / 2, y);
     }
     context.strokeStyle = "#cfc8bd";
     context.lineWidth = 1;
     context.beginPath();
     context.moveTo(layout.originX, layout.outerBorder);
     context.lineTo(layout.originX, layout.canvasHeight - layout.outerBorder);
+    context.moveTo(layout.originX + layout.gridWidth, layout.outerBorder);
+    context.lineTo(layout.originX + layout.gridWidth, layout.canvasHeight - layout.outerBorder);
     context.moveTo(layout.outerBorder, layout.originY);
     context.lineTo(layout.canvasWidth - layout.outerBorder, layout.originY);
+    context.moveTo(layout.outerBorder, layout.originY + layout.gridHeight);
+    context.lineTo(layout.canvasWidth - layout.outerBorder, layout.originY + layout.gridHeight);
     context.stroke();
 
     const symbolMap = new Map(state.selectedColors.map((color, index) => [color.id, SYMBOLS[index % SYMBOLS.length]]));
@@ -755,7 +769,7 @@
     // raise the zoom slider to inspect individual rows.
     const cellSize = Math.max(14, Math.min(24, Math.floor(4200 / Math.max(width, height))));
     drawPatternToCanvas(els.canvas, cellSize, false);
-    applyZoom(); if (els.emptyState) els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); if (els.canvasMeta) els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色 · 含坐标`;
+    applyZoom(); if (els.emptyState) els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); if (els.canvasMeta) els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色 · 四边坐标`;
   }
 
   function renderLegend() {
@@ -860,14 +874,23 @@
     ];
 
     const axisTextSize = layout.axisFontSize;
-    const axisBaseline = boardTop + layout.outerBorder + layout.topAxis / 2 + axisTextSize * .34;
+    const topAxisBaseline = boardTop + layout.outerBorder + layout.topAxis / 2 + axisTextSize * .34;
+    const bottomAxisBaseline = originTop + gridHeight + layout.bottomAxis / 2 + axisTextSize * .34;
+    const leftAxisCenter = boardLeft + layout.outerBorder + layout.leftAxis / 2;
+    const rightAxisCenter = originX + gridWidth + layout.rightAxis / 2;
     for (let column = 0; column < state.width; column++) {
-      commands.push(pdfTextCentered(String(column + 1), originX + column * cellSize + cellSize / 2, axisBaseline, axisTextSize, [94, 89, 79], pageHeight));
+      const label = String(column + 1);
+      const x = originX + column * cellSize + cellSize / 2;
+      commands.push(pdfTextCentered(label, x, topAxisBaseline, axisTextSize, [47, 44, 39], pageHeight));
+      commands.push(pdfTextCentered(label, x, bottomAxisBaseline, axisTextSize, [47, 44, 39], pageHeight));
     }
     for (let row = 0; row < state.height; row++) {
-      commands.push(pdfTextCentered(String(row + 1), boardLeft + layout.outerBorder + layout.leftAxis / 2, originTop + row * cellSize + cellSize / 2 + axisTextSize * .34, axisTextSize, [94, 89, 79], pageHeight));
+      const label = String(row + 1);
+      const baseline = originTop + row * cellSize + cellSize / 2 + axisTextSize * .34;
+      commands.push(pdfTextCentered(label, leftAxisCenter, baseline, axisTextSize, [47, 44, 39], pageHeight));
+      commands.push(pdfTextCentered(label, rightAxisCenter, baseline, axisTextSize, [47, 44, 39], pageHeight));
     }
-    commands.push(pdfStrokeRect([207, 200, 189], boardLeft + layout.outerBorder, boardTop + layout.outerBorder, layout.leftAxis + gridWidth, layout.topAxis + gridHeight, .55, pageHeight));
+    commands.push(pdfStrokeRect([207, 200, 189], boardLeft + layout.outerBorder, boardTop + layout.outerBorder, layout.leftAxis + gridWidth + layout.rightAxis, layout.topAxis + gridHeight + layout.bottomAxis, .55, pageHeight));
 
     for (let row = 0; row < state.height; row++) {
       for (let column = 0; column < state.width; column++) {
