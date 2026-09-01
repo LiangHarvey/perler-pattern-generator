@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.0</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.1</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -22,7 +22,8 @@
 
     <main class="app-shell">
       <aside class="panel controls-panel">
-        <div class="target-heading"><span>Target 1</span><strong>上传图片与生成设置</strong></div>
+        <div class="target-heading"><span>A层</span><strong>上传图片</strong></div>
+        <div class="controls-grid">
         <section class="step-card">
           <div class="step-heading"><span class="step-number">1</span><h2>上传图片</h2></div>
           <label id="dropZone" class="drop-zone" for="imageInput">
@@ -65,7 +66,7 @@
           <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
           <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 标准色卡</strong><small>内置 280 色 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
-          <p class="hint palette-note">提取主色会直接按内置 MARD 280 标准色卡匹配；颜色数越多，过渡越细、材料种类也越多。</p>
+          <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，不会调用档位外的颜色。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
           <div id="extractedColors" class="swatch-list"></div>
         </section>
@@ -92,10 +93,11 @@
           <button id="refreshMaterials" class="button button-outline" type="button" disabled>统计材料（当前图解）</button>
           <p class="hint">线长为估算值，实际用量会因针法、收尾方式而变化。</p>
         </section>
+        </div>
       </aside>
 
       <aside class="panel results-panel">
-        <div class="target-heading"><span>Target 2</span><strong>颜色图例与材料清单</strong></div>
+        <div class="target-heading"><span>B层</span><strong>材料图例</strong></div>
         <section class="result-section">
           <div class="result-heading"><h2>颜色图例</h2><span id="modeBadge" class="badge">MARD 标准色卡</span></div>
           <div id="legend" class="legend-list"><div class="empty-result">生成图解后显示颜色图例</div></div>
@@ -109,7 +111,7 @@
       </aside>
 
       <section class="workspace">
-        <div class="target-heading"><span>Target 3</span><strong>拼豆图纸</strong></div>
+        <div class="target-heading"><span>C层</span><strong>拼豆图纸</strong></div>
         <div class="workspace-toolbar">
           <div class="workspace-status"><span><span class="live-dot"></span><span id="statusText">等待上传图片</span></span><span class="toolbar-actions"><button id="toggleControls" class="toolbar-button" type="button" aria-expanded="true">隐藏设置</button><button id="toggleResults" class="toolbar-button" type="button" aria-expanded="true">隐藏结果</button><button id="fitPattern" class="toolbar-button" type="button">适应窗口</button></span></div>
           <div class="zoom-control"><span>缩放</span><input id="zoom" type="range" min="10" max="150" value="90" /><output id="zoomValue">90%</output></div>

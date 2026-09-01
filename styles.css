@@ -34,6 +34,10 @@ h2 { margin-bottom: 0; font-size: 15px; letter-spacing: -.02em; }
 .panel, .workspace { min-width: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
 .controls-panel { order: 1; padding: 16px; max-height: none; overflow: visible; }
+.controls-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-width: 0; }
+.controls-grid .step-card { min-width: 0; margin: 0; padding: 3px 16px 18px 0; border-bottom: 0; border-right: 1px solid var(--line); }
+.controls-grid .step-card + .step-card { padding-left: 16px; }
+.controls-grid .step-card:last-child { padding-right: 0; border-right: 0; }
 .target-heading { display: flex; align-items: center; gap: 9px; min-height: 31px; margin: -3px -2px 12px; padding: 0 2px 10px; border-bottom: 1px solid var(--line); color: var(--orange); }
 .target-heading span { padding: 3px 7px; border-radius: 999px; background: #fce6d9; font-size: 9px; font-weight: 800; letter-spacing: .04em; }
 .target-heading strong { color: var(--ink); font-size: 14px; }
@@ -143,6 +147,8 @@ td:first-child { color: var(--ink); font-weight: 700; }
 .tips-section p { margin: 5px 0 0; line-height: 1.6; }
 .hidden { display: none !important; }
 .loading-overlay { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(39, 37, 31, .28); backdrop-filter: blur(2px); cursor: wait; }
+.loading-overlay.hidden { display: none !important; }
+.loading-overlay:not(.hidden) { display: grid !important; }
 .loading-card { width: min(330px, calc(100vw - 36px)); padding: 24px 20px 21px; border: 1px solid rgba(255,255,255,.5); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 50px rgba(39, 31, 22, .24); text-align: center; }
 .loading-spinner { display: block; width: 35px; height: 35px; margin: 0 auto 14px; border: 3px solid #f3d5c3; border-top-color: var(--orange); border-radius: 50%; animation: loading-spin .8s linear infinite; }
 .loading-card strong, .loading-card span:not(.loading-spinner) { display: block; }
@@ -157,6 +163,8 @@ body.is-busy > *:not(.loading-overlay) { pointer-events: none; user-select: none
 @media (max-width: 1180px) { .app-shell { gap: 10px; padding: 10px; } .topbar { padding: 0 20px; } }
 @media (max-width: 900px) {
   .controls-panel, .results-panel { max-height: none; }
+  .controls-panel { overflow-x: auto; overflow-y: hidden; }
+  .controls-grid { grid-template-columns: repeat(4, minmax(225px, 1fr)); min-width: 940px; padding-bottom: 4px; }
   .results-panel { grid-template-columns: minmax(0, 1fr); }
   .workspace { min-height: min(66vh, 620px); order: 3; }
   .workspace-toolbar { align-items: stretch; flex-wrap: wrap; }

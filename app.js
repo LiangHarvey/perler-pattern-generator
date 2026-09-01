@@ -36,11 +36,44 @@
     { shortSide: 240, colors: 264, level: "MARD 高精度全色档" }
   ];
 
+  // The supplied MARD reference card groups its colors into 24-color blocks.
+  // Higher tiers are unions of the blocks shown at the bottom of that card.
+  // Keep these IDs as the source-of-truth candidates so a selected tier never
+  // borrows a color from a different tier.
+  const MARD_SUBSET_GROUPS = Object.freeze({
+    "1": ["B3", "C3", "D9", "E2", "G1", "A4", "B5", "C5", "D6", "E4", "G5", "A6", "B8", "C8", "D7", "F5", "G7", "A7", "H1", "H2", "H3", "H4", "H5", "H7"],
+    "2": ["C2", "C13", "D19", "E8", "A13", "A11", "C10", "C6", "D18", "E3", "A10", "G9", "C11", "C7", "D21", "D13", "F13", "G13", "B12", "D3", "D5", "E7", "F8", "G8"],
+    "3": ["A3", "B20", "D16", "D8", "E1", "G2", "B18", "B10", "D11", "D12", "E12", "G3", "B14", "B19", "D2", "D20", "E5", "F10", "B17", "B7", "C16", "D14", "E13", "F7"],
+    "4": ["E11", "E14", "F1", "A14", "M6", "M5", "E15", "F14", "F9", "F2", "G14", "M9", "E9", "E6", "F12", "F3", "F11", "M12", "D5", "E10", "F4", "F6", "G17", "H6"],
+    "5": ["A15", "A5", "A8", "A12", "A9", "G6", "A1", "B13", "B1", "B2", "B4", "B11", "H2", "C1", "B16", "B6", "C15", "B15", "C14", "D17", "D1", "C4", "C17", "C9"],
+    "6": ["H8", "G5", "A2", "H3", "G6", "H9", "H10", "M1", "G11", "G4", "M4", "H14", "M10", "M2", "G12", "M13", "M7", "H11", "M11", "M3", "G10", "M14", "M8", "M15"],
+    "7": ["P18", "P16", "P3", "P12", "P1", "T1", "P7", "P17", "P6", "P13", "P9", "P11", "P4", "P5", "P15", "P14", "P2", "R12", "P23", "P22", "P21", "P20", "P19", "P8"],
+    "8": ["P10", "R11", "Y2", "Y3", "Q2", "Y4", "Y5", "Y1", "R3", "R4", "R5", "R8", "R9", "R2", "R1", "R10", "R6", "R7", "D10", "R13", "Q5", "B9", "C12", "D4"],
+    "9": ["H17", "H8", "H19", "E16", "F16", "F17", "D23", "E24", "E19", "E18", "E17", "E20", "B24", "A16", "A17", "A18", "F24", "F23", "A24", "A22", "A21", "F21", "F22", "A19"],
+    "10": ["A26", "A25", "A20", "A23", "G18", "H21", "B26", "B32", "B31", "B30", "B27", "B29", "C22", "C23", "C24", "B28", "C25", "C27", "H15", "H20", "H23", "H22", "C28", "C21"],
+    "11": ["F15", "F19", "G20", "E21", "E22", "D26", "F25", "F20", "G19", "F18", "G21", "E23", "D25", "D22", "D24", "C20", "B21", "B25", "H16", "B23", "C18", "B22", "C19", "C26"],
+    A: ["B10", "C2", "C3", "C13", "D16", "D17", "B6", "C4", "C10", "C17", "D1", "D11", "C15", "C11", "C5", "C6", "C7", "D2", "B19", "B7", "C8", "C9", "D3", "C16"],
+    B: ["E12", "E2", "E8", "D19", "D8", "D9", "E6", "E4", "E3", "E9", "D12", "D6", "E5", "E10", "D5", "D13", "D20", "D18", "E7", "E13", "D21", "D14", "D7", "D15"],
+    C: ["C14", "B20", "C1", "B18", "M5", "M6", "B3", "B16", "B13", "B1", "G13", "F10", "B5", "B4", "B2", "B14", "G7", "F11", "B15", "B12", "B8", "B17", "B11", "G8"],
+    D: ["A15", "A3", "A11", "A9", "F14", "F12", "A4", "A13", "A6", "F1", "F2", "F3", "A5", "A10", "A7", "F13", "F9", "F6", "A8", "A14", "F4", "F5", "F8", "F7"],
+    E: ["E15", "E1", "E14", "E11", "H2", "H1", "A12", "G3", "G2", "G1", "A1", "H12", "G6", "G5", "G9", "M9", "H3", "H4", "G14", "M12", "G17", "H5", "H6", "H7"]
+  });
+  const MARD_SUBSET_TIERS = Object.freeze({
+    24: ["1"],
+    48: ["1", "2"],
+    72: ["1", "2", "3"],
+    96: ["1", "2", "3", "4"],
+    120: ["A", "B", "C", "D", "E"],
+    144: ["A", "B", "C", "D", "E", "6"],
+    216: ["A", "B", "C", "D", "E", "6", "9", "10", "11"],
+    264: ["A", "B", "C", "D", "E", "6", "7", "8", "9", "10", "11"]
+  });
+
   const SYMBOLS = ["●", "▲", "■", "◆", "✚", "✦", "○", "△", "□", "◇", "★", "※"];
   let sourceImage = null;
   let sourceFile = null;
   let sourceBounds = null;
-  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", stats: [], autoFit: false };
+  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", requestedColorCount: 24, stats: [], autoFit: false };
   let toastTimer;
   let busy = false;
 
@@ -90,11 +123,22 @@
     busy = visible;
     if (els.loadingOverlay) {
       els.loadingOverlay.classList.toggle("hidden", !visible);
+      els.loadingOverlay.hidden = !visible;
+      els.loadingOverlay.style.display = visible ? "grid" : "none";
+      els.loadingOverlay.style.pointerEvents = visible ? "auto" : "none";
       els.loadingOverlay.setAttribute("aria-busy", String(visible));
+      els.loadingOverlay.setAttribute("aria-hidden", String(!visible));
     }
     if (els.loadingTitle) els.loadingTitle.textContent = title;
     if (els.loadingDetail) els.loadingDetail.textContent = detail;
     if (document.body) document.body.classList.toggle("is-busy", visible);
+  }
+
+  // A single requestAnimationFrame runs before the browser paints. Use two
+  // frames so the blocking overlay is visible before image analysis begins.
+  function afterPaint(callback) {
+    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 32);
+    schedule(() => schedule(callback));
   }
 
   // The printed MARD chart uses A3/C13/H1 rather than zero-padded A03/C13/H01.
@@ -173,6 +217,15 @@
   }
 
   function paletteForStyle() { return activeMardPalette(); }
+
+  function paletteForColorCount(colorCount) {
+    const basePalette = activeMardPalette();
+    const groupNames = MARD_SUBSET_TIERS[Number(colorCount)];
+    if (!groupNames) return basePalette;
+    const subsetIds = new Set(groupNames.flatMap((groupName) => MARD_SUBSET_GROUPS[groupName] || []));
+    const subset = basePalette.filter((color) => subsetIds.has(color.id));
+    return subset.length ? subset : basePalette;
+  }
 
   function gridForShortSide(shortSide) {
     const bounds = sourceContentBounds();
@@ -326,7 +379,7 @@
       image.onload = () => {
         sourceImage = image;
         sourceBounds = detectContentBounds(image);
-        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0, autoFit: false };
+        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0, requestedColorCount: Number(els.colorCount.value) || 24, autoFit: false };
         els.sourceThumb.src = image.src;
         els.fileName.textContent = file.name;
         els.fileDimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}px`;
@@ -427,9 +480,9 @@
     return nearest;
   }
 
-  function buildSelectedColors(clusters, mode, style, desiredCount, pixels = [], rankedPalette = null) {
+  function buildSelectedColors(clusters, mode, style, desiredCount, pixels = [], rankedPalette = null, candidatePalette = null) {
     if (mode === "original") return clusters.slice(0, desiredCount).map((cluster, index) => ({ id: `C${String(index + 1).padStart(2, "0")}`, name: `真实色${index + 1}`, rgb: cluster.rgb, lab: rgbToLab(cluster.rgb), original: true }));
-    const palette = paletteForStyle(style);
+    const palette = candidatePalette || paletteForStyle(style);
     // Rank the complete MARD palette against the actual grid pixels first. This
     // preserves frequent highlight/shadow colors better than choosing a single
     // palette color from each k-means center, which can make a photo look flat.
@@ -521,14 +574,15 @@
     const style = getPaletteStyle();
     const sampledPixels = pixels.filter((_, index) => index % Math.max(1, Math.floor(pixels.length / 6000)) === 0);
     let rankedPalette = null;
+    const candidatePalette = mode === "mard" ? paletteForColorCount(desiredCount) : null;
     let clusters;
     if (mode === "mard") {
-      rankedPalette = paletteFrequencyOrder(pixels, paletteForStyle(style));
+      rankedPalette = paletteFrequencyOrder(pixels, candidatePalette);
       clusters = rankedPalette.slice(0, desiredCount).map(({ color, count }) => ({ rgb: color.rgb, count }));
     } else {
       clusters = desiredCount > 48 ? histogramClusters(sampledPixels, desiredCount) : kmeans(sampledPixels, desiredCount);
     }
-    return { mode, style, clusters, selectedColors: buildSelectedColors(clusters, mode, style, desiredCount, pixels, rankedPalette) };
+    return { mode, style, clusters, selectedColors: buildSelectedColors(clusters, mode, style, desiredCount, pixels, rankedPalette, candidatePalette) };
   }
 
   function extract() {
@@ -538,14 +592,14 @@
     els.gridWidth.value = width; els.gridHeight.value = height;
     setLoading(true, "正在提取主色", "正在分析图像并匹配 MARD 色卡，请稍候…");
     setStatus("正在提取颜色…");
-    requestAnimationFrame(() => {
+    afterPaint(() => {
       try {
         const data = drawSourceToGrid(width, height);
         const pixels = [];
         const radius = denoiseRadius(width, height);
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
         const { mode, style, clusters, selectedColors } = analyzePixels(pixels, colorCount);
-        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.width = width; state.height = height; state.sourcePixels = pixels;
+        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedColorCount = colorCount; state.width = width; state.height = height; state.sourcePixels = pixels;
         renderExtractedColors();
         setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
         showToast("主色提取完成，可以生成图解");
@@ -564,7 +618,7 @@
     const width = validDimension(els.gridWidth, 120), height = validDimension(els.gridHeight, 140);
     setLoading(true, "正在生成拼豆图解", "正在量化每个网格并写入 MARD 色号，请稍候…");
     setStatus("正在生成图解…");
-    requestAnimationFrame(() => {
+    afterPaint(() => {
       try {
         const data = drawSourceToGrid(width, height), pixels = [];
         const radius = denoiseRadius(width, height);
@@ -572,7 +626,7 @@
         const { mode, style, clusters, selectedColors } = analyzePixels(pixels, Number(els.colorCount.value));
         let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
         if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
-        state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, sourcePixels: pixels };
+        state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, requestedColorCount: Number(els.colorCount.value), sourcePixels: pixels };
         renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
         setDisabled(els.downloadPng, false); setDisabled(els.downloadPdf, false); setDisabled(els.downloadJson, false); setDisabled(els.copyMaterials, false);
         // In the vertical layout the upload/settings and legend targets remain
@@ -591,7 +645,7 @@
 
   function renderExtractedColors() {
     if (els.extractedColors) els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
-    if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${state.selectedColors.length} 色（标准 280 色卡）` : "原图真实色";
+    if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（卡组限定）` : "原图真实色";
   }
 
   function drawPatternToCanvas(targetCanvas, cellSize, forceCodes = false) {
@@ -658,13 +712,13 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD 280 standard / ${state.selectedColors.length} selected` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD 280 standard / ${state.requestedColorCount || state.selectedColors.length} tier` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
     if (!state.pattern.length) return showToast("请先生成拼豆图解");
     setLoading(true, "正在生成高清 PNG", "正在绘制大字号 MARD 色号，请稍候…");
-    requestAnimationFrame(() => {
+    afterPaint(() => {
       try {
         const exportCanvas = document.createElement("canvas");
         // Keep the longest edge around 4,800px while retaining at least 16px per
@@ -717,7 +771,7 @@
     const pageHeight = Math.max(PDF_MIN_HEIGHT, gridHeight + header + footer);
     const originX = (pageWidth - gridWidth) / 2;
     const originTop = header;
-    const paletteName = state.mode === "mard" ? `MARD 280 standard / ${state.selectedColors.length} selected` : "cluster colors";
+    const paletteName = state.mode === "mard" ? `MARD 280 standard / ${state.requestedColorCount || state.selectedColors.length} tier` : "cluster colors";
     const commands = ["q", pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight), pdfText(`Palette: ${paletteName}   Cells: ${state.pattern.length.toLocaleString()}   Single-page vector PDF`, margin, 35, 7, [95, 91, 82], pageHeight)];
 
     for (let row = 0; row < state.height; row++) {
