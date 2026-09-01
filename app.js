@@ -767,6 +767,36 @@
     if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（卡组限定）` : "原图真实色";
   }
 
+  const MARD_FAMILY_NAMES = Object.freeze({
+    A: "黄橙系", B: "绿色系", C: "蓝青系", D: "紫色系", E: "粉色系",
+    F: "红色系", G: "棕肤系", H: "黑白灰", M: "大地系", P: "柔和系",
+    Q: "特殊色", R: "高饱和色", T: "透明色", Y: "荧光色", ZG: "变色系"
+  });
+
+  function mardSeries(id) {
+    const match = String(id || "").toUpperCase().match(/^([A-Z]+)/);
+    return match ? match[1] : "";
+  }
+
+  function colorFamilyName(color) {
+    if (state.mode !== "mard") return "原图色";
+    return MARD_FAMILY_NAMES[mardSeries(color.id)] || "标准色";
+  }
+
+  function patternMaterialRows() {
+    const counts = new Map();
+    state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
+    const total = state.pattern.length;
+    const density = Math.max(1, Number(els.density && els.density.value) || 20);
+    return state.selectedColors
+      .filter((color) => counts.has(color.id))
+      .map((color) => {
+        const count = counts.get(color.id);
+        return { color, count, percent: total ? count / total * 100 : 0, length: count * (10 / density) * .016 };
+      })
+      .sort((a, b) => b.count - a.count || String(a.color.id).localeCompare(String(b.color.id)));
+  }
+
   function patternCanvasLayout(cellSize) {
     const { width, height } = state;
     const axisFontSize = Math.max(8, Math.min(16, Math.round(cellSize * .62)));
@@ -777,6 +807,15 @@
     const bottomAxis = topAxis;
     const originX = outerBorder + leftAxis;
     const originY = outerBorder + topAxis;
+    const baseCanvasWidth = originX + width * cellSize + rightAxis + outerBorder;
+    const footerPadding = Math.max(16, Math.round(cellSize * 1.1));
+    const footerGap = Math.max(18, Math.round(cellSize * 1.2));
+    const footerFontSize = Math.max(10, Math.min(18, Math.round(cellSize * .72)));
+    const footerColumns = baseCanvasWidth >= 1100 ? 4 : baseCanvasWidth >= 760 ? 3 : baseCanvasWidth >= 480 ? 2 : 1;
+    const footerRows = Math.max(1, Math.ceil(Math.max(1, patternMaterialRows().length) / footerColumns));
+    const footerItemHeight = Math.max(42, Math.round(cellSize * 2.6));
+    const footerHeight = footerPadding * 2 + footerFontSize * 2.2 + footerRows * footerItemHeight + footerFontSize * 4.4;
+    const footerTop = originY + height * cellSize + bottomAxis + outerBorder + footerGap;
     return {
       axisFontSize,
       outerBorder,
@@ -788,9 +827,61 @@
       originY,
       gridWidth: width * cellSize,
       gridHeight: height * cellSize,
-      canvasWidth: originX + width * cellSize + rightAxis + outerBorder,
-      canvasHeight: originY + height * cellSize + bottomAxis + outerBorder
+      canvasWidth: baseCanvasWidth,
+      canvasHeight: footerTop + footerHeight + outerBorder,
+      boardHeight: originY + height * cellSize + bottomAxis + outerBorder,
+      footerTop, footerHeight, footerPadding, footerGap, footerFontSize, footerColumns, footerRows, footerItemHeight
     };
+  }
+
+  function drawMaterialFooter(context, layout, cellSize) {
+    const rows = patternMaterialRows();
+    const left = layout.outerBorder;
+    const width = layout.canvasWidth - layout.outerBorder * 2;
+    const top = layout.footerTop;
+    context.fillStyle = "#ffffff";
+    context.fillRect(left, top, width, layout.footerHeight);
+    context.strokeStyle = "#d8d2c8";
+    context.lineWidth = 1;
+    context.strokeRect(left + .5, top + .5, width - 1, layout.footerHeight - 1);
+    const titleSize = Math.max(14, layout.footerFontSize * 1.25);
+    context.fillStyle = "#25221f";
+    context.font = `700 ${titleSize}px Arial, "Microsoft YaHei", sans-serif`;
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.fillText("用料清单", left + layout.footerPadding, top + layout.footerPadding);
+
+    const contentTop = top + layout.footerPadding + titleSize * 1.8;
+    const columnWidth = (width - layout.footerPadding * 2) / layout.footerColumns;
+    rows.forEach(({ color, count }, index) => {
+      const column = index % layout.footerColumns;
+      const row = Math.floor(index / layout.footerColumns);
+      const x = left + layout.footerPadding + column * columnWidth;
+      const y = contentTop + row * layout.footerItemHeight;
+      const swatchSize = Math.max(26, Math.round(cellSize * 1.65));
+      context.fillStyle = rgbCss(color.rgb);
+      context.fillRect(x, y, swatchSize, swatchSize);
+      context.strokeStyle = "#77736b";
+      context.strokeRect(x + .5, y + .5, swatchSize - 1, swatchSize - 1);
+      const codeSize = Math.max(9, Math.min(layout.footerFontSize, swatchSize * .38));
+      context.font = `700 ${codeSize}px Arial, "Microsoft YaHei", sans-serif`;
+      context.textAlign = "center"; context.textBaseline = "middle";
+      context.fillStyle = contrastText(color.rgb);
+      context.fillText(String(color.id), x + swatchSize / 2, y + swatchSize / 2);
+      context.textAlign = "left"; context.textBaseline = "top";
+      context.fillStyle = "#2f2c27";
+      context.font = `700 ${layout.footerFontSize}px Arial, "Microsoft YaHei", sans-serif`;
+      context.fillText(`${color.id} · ${colorFamilyName(color)}`, x + swatchSize + 10, y + 1);
+      context.fillStyle = "#77736b";
+      context.font = `400 ${Math.max(9, layout.footerFontSize * .9)}px Arial, "Microsoft YaHei", sans-serif`;
+      context.fillText(`${count.toLocaleString()} 颗`, x + swatchSize + 10, y + layout.footerFontSize * 1.45);
+    });
+    const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + layout.footerFontSize * .6;
+    context.fillStyle = "#25221f";
+    context.font = `700 ${Math.max(12, layout.footerFontSize * 1.1)}px Arial, "Microsoft YaHei", sans-serif`;
+    context.textAlign = "left"; context.textBaseline = "top";
+    context.fillText(`所需豆子总数：${state.pattern.length.toLocaleString()} 颗`, left + layout.footerPadding, summaryTop);
+    context.fillText(`图纸尺寸：${state.width} 列 × ${state.height} 行 · 辅助线每 10 格`, left + layout.footerPadding, summaryTop + layout.footerFontSize * 1.8);
   }
 
   function cellCodeFontSize(label, cellSize) {
@@ -816,7 +907,7 @@
     context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
     context.strokeStyle = "#d8d2c8";
     context.lineWidth = 1;
-    context.strokeRect(layout.outerBorder + .5, layout.outerBorder + .5, layout.canvasWidth - layout.outerBorder * 2 - 1, layout.canvasHeight - layout.outerBorder * 2 - 1);
+    context.strokeRect(layout.outerBorder + .5, layout.outerBorder + .5, layout.canvasWidth - layout.outerBorder * 2 - 1, layout.boardHeight - layout.outerBorder * 2 - 1);
 
     // Every column and row receives a 1-based coordinate on all four sides.
     context.fillStyle = "#2f2c27";
@@ -839,9 +930,9 @@
     context.lineWidth = 1;
     context.beginPath();
     context.moveTo(layout.originX, layout.outerBorder);
-    context.lineTo(layout.originX, layout.canvasHeight - layout.outerBorder);
+    context.lineTo(layout.originX, layout.boardHeight - layout.outerBorder);
     context.moveTo(layout.originX + layout.gridWidth, layout.outerBorder);
-    context.lineTo(layout.originX + layout.gridWidth, layout.canvasHeight - layout.outerBorder);
+    context.lineTo(layout.originX + layout.gridWidth, layout.boardHeight - layout.outerBorder);
     context.moveTo(layout.outerBorder, layout.originY);
     context.lineTo(layout.canvasWidth - layout.outerBorder, layout.originY);
     context.moveTo(layout.outerBorder, layout.originY + layout.gridHeight);
@@ -871,6 +962,7 @@
     context.strokeStyle = "rgba(37,34,26,.55)";
     context.lineWidth = 1.4;
     context.strokeRect(layout.originX + .5, layout.originY + .5, layout.gridWidth - 1, layout.gridHeight - 1);
+    drawMaterialFooter(context, layout, cellSize);
     return layout;
   }
 
@@ -894,10 +986,8 @@
 
   function renderMaterials() {
     if (!els.materialsBody) return;
-    const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
     const total = state.pattern.length;
-    const density = Math.max(1, Number(els.density.value) || 20);
-    const rows = state.selectedColors.filter((color) => counts.has(color.id)).map((color) => { const count = counts.get(color.id); const length = count * (10 / density) * 0.016; return { color, count, percent: total ? count / total * 100 : 0, length }; }).sort((a, b) => b.count - a.count);
+    const rows = patternMaterialRows();
     state.stats = rows;
     els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`).join("");
     if (els.totalStitches) els.totalStitches.textContent = total.toLocaleString();
@@ -982,8 +1072,8 @@
       "q",
       pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight),
       pdfText(`Palette: ${paletteName}   Cells: ${state.pattern.length.toLocaleString()}   Single-page vector PDF`, margin, 35, 7, [95, 91, 82], pageHeight),
-      pdfFillRect([255, 255, 255], boardLeft, boardTop, layout.canvasWidth, layout.canvasHeight, pageHeight),
-      pdfStrokeRect([216, 210, 200], boardLeft, boardTop, layout.canvasWidth, layout.canvasHeight, .8, pageHeight)
+      pdfFillRect([255, 255, 255], boardLeft, boardTop, layout.canvasWidth, layout.boardHeight, pageHeight),
+      pdfStrokeRect([216, 210, 200], boardLeft, boardTop, layout.canvasWidth, layout.boardHeight, .8, pageHeight)
     ];
 
     const axisTextSize = layout.axisFontSize;
@@ -1037,6 +1127,31 @@
         commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb), pageHeight));
       }
     }
+
+    const materialRows = patternMaterialRows();
+    const footerLeft = boardLeft;
+    const footerTop = boardTop + layout.footerTop;
+    const footerWidth = layout.canvasWidth;
+    commands.push(pdfFillRect([255, 255, 255], footerLeft, footerTop, footerWidth, layout.footerHeight, pageHeight));
+    commands.push(pdfStrokeRect([216, 210, 200], footerLeft, footerTop, footerWidth, layout.footerHeight, .8, pageHeight));
+    commands.push(pdfText("Materials", footerLeft + layout.footerPadding, footerTop + layout.footerPadding + 12, 14, [37, 34, 31], pageHeight));
+    const contentTop = footerTop + layout.footerPadding + 30;
+    const columnWidth = (footerWidth - layout.footerPadding * 2) / layout.footerColumns;
+    materialRows.forEach(({ color, count }, index) => {
+      const column = index % layout.footerColumns;
+      const row = Math.floor(index / layout.footerColumns);
+      const x = footerLeft + layout.footerPadding + column * columnWidth;
+      const top = contentTop + row * layout.footerItemHeight;
+      const swatchSize = 28;
+      commands.push(pdfFillRect(color.rgb, x, top, swatchSize, swatchSize, pageHeight));
+      commands.push(pdfStrokeRect([110, 106, 99], x, top, swatchSize, swatchSize, .6, pageHeight));
+      commands.push(pdfTextCentered(String(color.id), x + swatchSize / 2, top + 18, 8, contrastRgb(color.rgb), pageHeight));
+      commands.push(pdfText(`${color.id} / ${mardSeries(color.id)} series`, x + swatchSize + 8, top + 10, 9, [47, 44, 39], pageHeight));
+      commands.push(pdfText(`${count.toLocaleString()} beads`, x + swatchSize + 8, top + 23, 8, [112, 107, 98], pageHeight));
+    });
+    const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + 11;
+    commands.push(pdfText(`Total beads: ${state.pattern.length.toLocaleString()}`, footerLeft + layout.footerPadding, summaryTop, 11, [37, 34, 31], pageHeight));
+    commands.push(pdfText(`Pattern: ${state.width} columns x ${state.height} rows / guide line every 10 cells`, footerLeft + layout.footerPadding, summaryTop + 18, 10, [37, 34, 31], pageHeight));
     commands.push(pdfText("Perler Pattern  |  Print with fit-to-page if necessary", margin, pageHeight - 8, 7, [130, 124, 113], pageHeight), "Q");
     return { content: commands.join("\n"), pageWidth, pageHeight };
   }
