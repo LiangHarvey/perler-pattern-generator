@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8f5ef" />
     <title>拼豆图纸生成器</title>
-    <link rel="stylesheet" href="styles.css?v=0.5.8" />
+    <link rel="stylesheet" href="styles.css?v=0.5.9" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.8</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.9</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -52,7 +52,7 @@
         </section>
 
         <section class="step-card">
-        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD 280 标准色卡</span></div>
+        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD SKU + 图2/3色值</span></div>
         <label class="select-field"><span>使用 MARD 色数 <small>标准色卡档位</small></span><select id="colorCount">
           <option value="24">24 色 · 基础精度</option>
           <option value="48">48 色 · 细节增强</option>
@@ -64,9 +64,10 @@
           <option value="264">264 色 · MARD 高精度全色档</option>
         </select></label>
           <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
-          <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 标准色卡</strong><small>内置 280 色 · 每格对应 MARD 色号</small></span></label>
+          <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD SKU 标准色卡</strong><small>图2/3已匹配 221 色 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
           <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，并通过 CIEDE2000 感知色差精确匹配色号，不会调用档位外的颜色。</p>
+          <div id="paletteValidation" class="palette-validation" role="status">正在校验 SKU 色号与 HEX/RGB…</div>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
           <details id="extractedResultDetails" class="result-disclosure" open>
             <summary><span class="disclosure-title">提取结果</span><span id="extractedResultSummary" class="disclosure-meta">上传图片后生成</span></summary>
@@ -136,7 +137,8 @@
     <div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
       <div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><strong id="loadingTitle">正在处理</strong><span id="loadingDetail">请稍候，处理完成前页面不会响应其他操作。</span></div>
     </div>
-    <script src="mard-palette.js?v=0.5.8"></script>
-    <script src="app.js?v=0.5.8"></script>
+    <script src="mard-palette.js?v=0.5.9"></script>
+    <script src="mard-reference-221.js?v=0.5.9"></script>
+    <script src="app.js?v=0.5.9"></script>
   </body>
 </html>

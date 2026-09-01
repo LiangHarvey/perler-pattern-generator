@@ -5,7 +5,7 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
+    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
     showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
@@ -209,7 +209,10 @@
   }
   function setStatus(message, ready = false) { if (els.statusText) els.statusText.textContent = message; if (els.liveDot) els.liveDot.classList.toggle("ready", ready); }
   function setDisabled(element, disabled) { if (element) element.disabled = disabled; }
-  function syncColorCountLabel() { if (els.colorCountValue && els.colorCount) els.colorCountValue.textContent = els.colorCount.value; }
+  function syncColorCountLabel() {
+    if (els.colorCountValue && els.colorCount) els.colorCountValue.textContent = els.colorCount.value;
+    updatePaletteValidation();
+  }
   function validDimension(input, fallback) { const n = Number(input.value); return Number.isFinite(n) ? Math.max(8, Math.min(240, Math.round(n))) : fallback; }
 
   function setLoading(visible, title = "正在处理", detail = "请稍候，处理完成前页面不会响应其他操作。") {
@@ -237,7 +240,7 @@
   // The printed MARD chart uses A3/C13/H1 rather than zero-padded A03/C13/H01.
   // Keep the internal palette data flexible, but show and export the chart's
   // canonical code format.
-  function canonicalMardId(value) { return String(value).trim().replace(/^([A-Za-z]+)0+(\d+)$/, "$1$2"); }
+  function canonicalMardId(value) { return String(value).trim().toUpperCase().replace(/^([A-Z]+)0+(\d+)$/, "$1$2"); }
   function clonePaletteColor(color) {
     const id = canonicalMardId(color.id);
     const rgb = [...color.rgb];
@@ -305,29 +308,43 @@
   }
 
   function activeMardPalette() {
-    const palette = window.MARD_PALETTE_280 || DMC;
+    const palette = window.MARD_REFERENCE_221 || window.MARD_PALETTE_280 || DMC;
     return palette.length ? palette.map(clonePaletteColor) : DMC;
   }
 
   function paletteForStyle() { return activeMardPalette(); }
 
-  function canonicalMardId(id) {
-    return String(id).toUpperCase().replace(/^([A-Z]+)(\d+)$/, (_, series, number) => `${series}${number.padStart(2, "0")}`);
+  function skuRequestedIds(colorCount) {
+    const groupNames = MARD_SUBSET_TIERS[Number(colorCount)];
+    return groupNames ? [...new Set(groupNames.flatMap((groupName) => MARD_SUBSET_GROUPS[groupName] || []).map(canonicalMardId))] : [];
+  }
+
+  function skuPaletteValidation(colorCount) {
+    const requestedIds = skuRequestedIds(colorCount);
+    const reference = (window.MARD_REFERENCE_221 || []).map(clonePaletteColor);
+    const referenceIds = new Set(reference.map((color) => canonicalMardId(color.id)));
+    const missingIds = requestedIds.filter((id) => !referenceIds.has(id));
+    const matchedIds = new Set(requestedIds.filter((id) => referenceIds.has(id)));
+    return { requestedIds, missingIds, matchedPalette: reference.filter((color) => matchedIds.has(canonicalMardId(color.id))) };
+  }
+
+  function updatePaletteValidation() {
+    if (!els.paletteValidation || !els.colorCount) return;
+    const colorCount = Number(els.colorCount.value);
+    const validation = skuPaletteValidation(colorCount);
+    if (!validation.missingIds.length) {
+      els.paletteValidation.classList.remove("warning");
+      els.paletteValidation.textContent = `${colorCount} 色 SKU：图1区域中的 ${validation.matchedPalette.length} 个色号均已匹配图2/3 HEX 与 RGB。`;
+      return;
+    }
+    els.paletteValidation.classList.add("warning");
+    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，图2/3已匹配 ${validation.matchedPalette.length} 色；未匹配 ${validation.missingIds.length} 色：${validation.missingIds.join("、")}。未匹配颜色不会参与生成。`;
   }
 
   function paletteForColorCount(colorCount) {
-    // Tier definitions come from the official MARD card and include Q05 in the
-    // 264-color tier. Build tiers from the complete 291-color reference rather
-    // than the general 280-color view, which intentionally excludes Q03-Q05.
-    const basePalette = (window.MARD_PALETTE_291 || window.MARD_PALETTE_280 || DMC).map(clonePaletteColor);
-    const groupNames = MARD_SUBSET_TIERS[Number(colorCount)];
-    if (!groupNames) return activeMardPalette();
-    const subsetIds = new Set(groupNames.flatMap((groupName) => MARD_SUBSET_GROUPS[groupName] || []).map(canonicalMardId));
-    const subset = basePalette.filter((color) => subsetIds.has(canonicalMardId(color.id)));
-    if (subset.length !== Number(colorCount)) {
-      console.warn(`MARD ${colorCount} 色档配置异常：实际加载 ${subset.length} 色。`);
-    }
-    return subset.length ? subset : activeMardPalette();
+    const validation = skuPaletteValidation(colorCount);
+    if (validation.missingIds.length) console.warn(`MARD ${colorCount} 色 SKU 缺少 HEX/RGB：${validation.missingIds.join(", ")}`);
+    return validation.matchedPalette.length ? validation.matchedPalette : activeMardPalette();
   }
 
   function gridForShortSide(shortSide) {
@@ -1000,7 +1017,7 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD 280 standard / ${state.requestedColorCount || state.selectedColors.length} tier` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
@@ -1067,7 +1084,7 @@
     const originTop = boardTop + layout.originY;
     const gridWidth = layout.gridWidth;
     const gridHeight = layout.gridHeight;
-    const paletteName = state.mode === "mard" ? `MARD 280 standard / ${state.requestedColorCount || state.selectedColors.length} tier` : "cluster colors";
+    const paletteName = state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors";
     const commands = [
       "q",
       pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight),
@@ -1247,4 +1264,5 @@
   });
   if (els.fitPattern) els.fitPattern.addEventListener("click", () => { fitPatternToViewport(); showToast("图纸已适应当前窗口"); });
   if (window.addEventListener) window.addEventListener("resize", () => { if (state.autoFit) scheduleFitPattern(); });
+  syncColorCountLabel();
 })();
