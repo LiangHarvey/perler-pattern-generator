@@ -4,11 +4,12 @@
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
-    imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"),
+    imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
     denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"),
+    paletteInput: $("#paletteInput"), paletteStatus: $("#paletteStatus"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
-    modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadJson: $("#downloadJson"), toast: $("#toast")
+    showCodes: $("#showCodes"), pdfCellsPerPage: $("#pdfCellsPerPage"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast")
   };
 
   const DMC = [
@@ -26,7 +27,8 @@
   const SYMBOLS = ["●", "▲", "■", "◆", "✚", "✦", "○", "△", "□", "◇", "★", "※"];
   let sourceImage = null;
   let sourceFile = null;
-  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "dmc", paletteStyle: "all", stats: [] };
+  let customMardPalette = null;
+  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", stats: [] };
   let toastTimer;
 
   // RGB -> LAB gives a perceptual distance that is more useful for color matching than raw RGB.
@@ -45,15 +47,114 @@
   function clamp(v, min = 0, max = 255) { return Math.max(min, Math.min(max, v)); }
   function rgbCss(rgb) { return `rgb(${rgb.map((v) => Math.round(v)).join(",")})`; }
   function hex(rgb) { return "#" + rgb.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase(); }
+  function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character])); }
+  function contrastText(rgb) { return (.299 * rgb[0] + .587 * rgb[1] + .114 * rgb[2]) > 158 ? "#273025" : "#fffdf7"; }
+  function contrastRgb(rgb) { return contrastText(rgb) === "#273025" ? [39, 48, 37] : [255, 253, 247]; }
   function getMode() { return $("input[name='colorMode']:checked").value; }
   function getEdgeMode() { return $("input[name='edgeMode']:checked").value; }
   function showToast(message) { clearTimeout(toastTimer); els.toast.textContent = message; els.toast.classList.add("show"); toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2600); }
   function setStatus(message, ready = false) { els.statusText.textContent = message; els.liveDot.classList.toggle("ready", ready); }
   function validDimension(input, fallback) { const n = Number(input.value); return Number.isFinite(n) ? Math.max(8, Math.min(240, Math.round(n))) : fallback; }
 
+  function activeMardPalette() {
+    const palette = customMardPalette || window.MARD_PALETTE_280 || DMC;
+    return palette.length ? palette : DMC;
+  }
+
+  const STYLE_SERIES = {
+    warm: new Set(["A", "E", "F", "G", "M"]),
+    natural: new Set(["B", "C", "G", "H", "M"]),
+    fresh: new Set(["B", "C", "D", "E", "P", "R", "Y"]),
+    vivid: new Set(["A", "B", "C", "D", "E", "F", "R"])
+  };
+
   function paletteForStyle(style) {
-    if (style === "all") return DMC;
-    return DMC.filter((color) => color.tags.includes(style));
+    const palette = activeMardPalette();
+    if (style === "all") return palette;
+    const filtered = palette.filter((color) => (color.tags || []).includes(style) || (STYLE_SERIES[style] && STYLE_SERIES[style].has(color.series)));
+    return filtered.length >= 3 ? filtered : palette;
+  }
+
+  function gridForShortSide(shortSide) {
+    const sourceWidth = sourceImage.naturalWidth;
+    const sourceHeight = sourceImage.naturalHeight;
+    let width = sourceWidth >= sourceHeight ? Math.round(shortSide * sourceWidth / sourceHeight) : shortSide;
+    let height = sourceWidth >= sourceHeight ? shortSide : Math.round(shortSide * sourceHeight / sourceWidth);
+    const fit = Math.min(240 / width, 240 / height, 1);
+    width = Math.max(8, Math.round(width * fit));
+    height = Math.max(8, Math.round(height * fit));
+    return { width, height };
+  }
+
+  function updateQualityInfo() {
+    if (!sourceImage) return;
+    const sourceWidth = sourceImage.naturalWidth;
+    const sourceHeight = sourceImage.naturalHeight;
+    const width = validDimension(els.gridWidth, 120);
+    const height = validDimension(els.gridHeight, 140);
+    const pixelsPerBead = Math.min(sourceWidth / width, sourceHeight / height);
+    const sourceShortSide = Math.min(sourceWidth, sourceHeight);
+    const isLowResolution = sourceShortSide < 128 || pixelsPerBead < 2;
+    const resolutionText = pixelsPerBead >= 1 ? `${pixelsPerBead.toFixed(1)} px/格` : "低于 1 px/格";
+    els.qualityInfo.innerHTML = `<strong>原图 ${sourceWidth} × ${sourceHeight}px</strong> · 当前 ${width} × ${height} 格 · ${resolutionText}<br>${isLowResolution ? "原图细节不足，建议先用 Bigjpg 放大后再生成。" : "已按原图比例计算选项，越往下精度越高、格子越多。"}`;
+    els.qualityInfo.classList.remove("hidden");
+    els.qualityInfo.classList.toggle("warning", isLowResolution);
+  }
+
+  function populatePrecisionOptions() {
+    if (!sourceImage) return;
+    const sourceShortSide = Math.min(sourceImage.naturalWidth, sourceImage.naturalHeight);
+    // Two source pixels per bead is a practical upper bound for a stable automatic choice.
+    const recommendedMax = Math.max(8, Math.min(240, Math.floor(sourceShortSide / 2)));
+    const candidateShortSides = [20, 30, 40, 50, 60, 80, 100, 120, 160, 200, 240]
+      .filter((value) => value <= recommendedMax);
+    if (!candidateShortSides.length || candidateShortSides[candidateShortSides.length - 1] !== recommendedMax) candidateShortSides.push(recommendedMax);
+
+    const options = [];
+    const seen = new Set();
+    candidateShortSides.forEach((shortSide, index) => {
+      const grid = gridForShortSide(shortSide);
+      const key = `${grid.width}x${grid.height}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const level = index === 0 ? "低精度" : index === candidateShortSides.length - 1 ? "高精度" : `精度 ${index}`;
+      options.push({ ...grid, label: `${level} · ${grid.width} × ${grid.height} 格（约 ${(grid.width * grid.height).toLocaleString()} 颗）` });
+    });
+
+    els.precisionSelect.innerHTML = options.map((option) => `<option value="${option.width}x${option.height}" data-width="${option.width}" data-height="${option.height}">${option.label}</option>`).join("") + '<option value="custom">自定义网格（手动输入）</option>';
+    // Keep the default readable on mobile while still adapting to the source image.
+    const defaultOption = options[Math.min(4, options.length - 1)];
+    if (defaultOption) {
+      els.precisionSelect.value = `${defaultOption.width}x${defaultOption.height}`;
+      els.gridWidth.value = defaultOption.width;
+      els.gridHeight.value = defaultOption.height;
+    }
+    els.precisionSelect.disabled = false;
+    updateQualityInfo();
+  }
+
+  function applyPrecisionSelection() {
+    const option = els.precisionSelect.selectedOptions[0];
+    if (!option || !option.dataset.width) return;
+    els.gridWidth.value = option.dataset.width;
+    els.gridHeight.value = option.dataset.height;
+    markPatternStale("精度已改变，请重新生成图解");
+    updateQualityInfo();
+  }
+
+  function markPatternStale(message = "参数已改变，请重新生成图解") {
+    if (!state.pattern.length) return;
+    els.downloadPng.disabled = true;
+    els.downloadPdf.disabled = true;
+    els.downloadJson.disabled = true;
+    els.copyMaterials.disabled = true;
+    setStatus(message);
+  }
+
+  function markCustomPrecision() {
+    if (!els.precisionSelect.disabled) els.precisionSelect.value = "custom";
+    markPatternStale("网格尺寸已改变，请重新生成图解");
+    updateQualityInfo();
   }
 
   function loadImage(file) {
@@ -64,6 +165,7 @@
       const image = new Image();
       image.onload = () => {
         sourceImage = image;
+        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0 };
         els.sourceThumb.src = image.src;
         els.fileName.textContent = file.name;
         els.fileDimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}px`;
@@ -71,12 +173,122 @@
         els.extractColors.disabled = false;
         els.generatePattern.disabled = false;
         els.refreshMaterials.disabled = false;
+        els.bigjpgButton.disabled = false;
+        els.downloadPng.disabled = true;
+        els.downloadPdf.disabled = true;
+        els.downloadJson.disabled = true;
+        els.copyMaterials.disabled = true;
+        els.canvas.classList.add("hidden");
+        els.emptyState.classList.remove("hidden");
+        els.canvasMeta.textContent = "—";
+        els.extractedColors.innerHTML = "";
+        els.legend.innerHTML = '<div class="empty-result">生成图解后显示颜色图例</div>';
+        els.materialsBody.innerHTML = '<tr><td colspan="4" class="empty-result">暂无数据</td></tr>';
+        els.totalStitches.textContent = "—";
+        populatePrecisionOptions();
         setStatus("图片已载入，等待生成", true);
         showToast("图片已载入，可以开始提取主色");
       };
       image.src = reader.result;
     };
     reader.readAsDataURL(file);
+  }
+
+  function parseHexValue(value) {
+    if (typeof value !== "string") return null;
+    const match = value.trim().replace(/^0x/i, "").match(/^#?([0-9a-f]{6})$/i);
+    if (!match) return null;
+    const raw = match[1];
+    return [parseInt(raw.slice(0, 2), 16), parseInt(raw.slice(2, 4), 16), parseInt(raw.slice(4, 6), 16)];
+  }
+
+  function parseRgbValue(value) {
+    if (Array.isArray(value) && value.length >= 3) {
+      const rgb = value.slice(0, 3).map(Number);
+      return rgb.every((component) => Number.isFinite(component)) ? rgb.map((component) => clamp(component)) : null;
+    }
+    if (typeof value !== "string") return null;
+    const match = value.match(/(?:rgb\s*\()?\s*(\d{1,3})\s*[,;\s]+\s*(\d{1,3})\s*[,;\s]+\s*(\d{1,3})\s*\)?/i);
+    return match ? match.slice(1, 4).map((component) => clamp(Number(component))) : null;
+  }
+
+  function normalizePaletteRecord(record, index) {
+    if (!record || typeof record !== "object") return null;
+    const rawId = record.id ?? record.code ?? record.colorCode ?? record.mard ?? record.MARD ?? record.number;
+    const rawName = record.name ?? record.label ?? record.title ?? "";
+    const rawHex = record.hex ?? record.HEX ?? record.colorHex ?? record.value;
+    const rawRgb = record.rgb ?? record.RGB ?? record.colorRgb ?? record.color;
+    let id = rawId == null ? "" : String(rawId).trim();
+    let rgb = parseHexValue(rawHex) || parseRgbValue(rawRgb) || parseRgbValue(rawHex);
+    if (!rgb && Number.isFinite(Number(record.r)) && Number.isFinite(Number(record.g)) && Number.isFinite(Number(record.b))) rgb = [Number(record.r), Number(record.g), Number(record.b)].map((component) => clamp(component));
+    if (parseHexValue(id) && rawHex && !parseHexValue(rawHex) && !parseRgbValue(rawHex)) {
+      rgb = parseHexValue(id);
+      id = String(rawHex).trim();
+    } else if (parseHexValue(id) && rawName && !parseHexValue(rawName)) {
+      rgb = parseHexValue(id);
+      id = String(rawName).trim();
+    }
+    if (!rgb || !id) return null;
+    const seriesMatch = id.match(/^[A-Za-z]+/);
+    return { id, name: String(rawName || `MARD ${id}`), rgb, hex: hex(rgb), series: record.series || (seriesMatch ? seriesMatch[0].toUpperCase() : "") };
+  }
+
+  function splitPaletteLine(line) {
+    return line.trim().split(/\s*[,;\t]\s*/).map((value) => value.trim()).filter(Boolean);
+  }
+
+  function parsePaletteText(text, fileName = "") {
+    const trimmed = text.replace(/^\uFEFF/, "").trim();
+    let records = [];
+    if (fileName.toLowerCase().endsWith(".json") || trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) records = parsed;
+      else if (Array.isArray(parsed.colors)) records = parsed.colors;
+      else if (Array.isArray(parsed.palette)) records = parsed.palette;
+      else if (Array.isArray(parsed.data)) records = parsed.data;
+      else if (Array.isArray(parsed.items)) records = parsed.items;
+      else if (parsed && typeof parsed === "object") {
+        records = Object.entries(parsed).map(([key, value]) => typeof value === "object" && value !== null ? { ...value, id: value.id ?? value.code ?? key } : { id: key, value });
+      }
+    } else {
+      records = trimmed.split(/\r?\n/).slice(0, 1000).map((line) => {
+        const values = splitPaletteLine(line);
+        const rgbIndex = values.findIndex((value) => parseHexValue(value) || parseRgbValue(value));
+        let rgb = rgbIndex >= 0 ? parseHexValue(values[rgbIndex]) || parseRgbValue(values[rgbIndex]) : null;
+        if (!rgb) {
+          for (let index = 0; index <= values.length - 3; index++) {
+            const triplet = values.slice(index, index + 3).map(Number);
+            if (triplet.every((component) => Number.isFinite(component) && component >= 0 && component <= 255)) { rgb = triplet; break; }
+          }
+        }
+        if (!rgb) return null;
+        const id = values.find((value) => /^[A-Za-z]{1,4}\s*[-_]?\s*\d{1,4}$/i.test(value)) || values.find((value, index) => index !== rgbIndex && !/^\d+(?:\.\d+)?$/.test(value)) || `MARD-${values.length}`;
+        return { id, name: id, rgb, hex: hex(rgb) };
+      }).filter(Boolean);
+    }
+    const unique = new Map();
+    records.map((record, index) => normalizePaletteRecord(record, index)).filter(Boolean).forEach((color) => {
+      if (!unique.has(color.id)) unique.set(color.id, color);
+    });
+    return [...unique.values()];
+  }
+
+  async function importPaletteFile(file) {
+    if (!file) return;
+    try {
+      const palette = parsePaletteText(await file.text(), file.name);
+      if (palette.length < 3) throw new Error("至少需要 3 个有效色号和颜色值");
+      customMardPalette = palette;
+      els.paletteStatus.textContent = `已载入自定义色卡：${palette.length} 色。下次生成图解时使用这些色号。`;
+      markPatternStale("色卡已改变，请重新生成图解");
+      showToast(`已导入 ${palette.length} 个颜色`);
+      if (sourceImage) setStatus("色卡已更新，请重新生成图解", true);
+    } catch (error) {
+      els.paletteStatus.textContent = `色卡导入失败：${error.message || "文件格式无法识别"}`;
+      showToast("色卡文件无法识别，请检查 CSV/JSON 格式");
+    } finally {
+      els.paletteInput.value = "";
+    }
   }
 
   function drawSourceToGrid(width, height) {
@@ -214,12 +426,15 @@
       if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
       state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: els.paletteStyle.value, sourcePixels: pixels };
       renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
-      els.downloadPng.disabled = false; els.downloadJson.disabled = false; els.copyMaterials.disabled = false;
+      els.downloadPng.disabled = false; els.downloadPdf.disabled = false; els.downloadJson.disabled = false; els.copyMaterials.disabled = false;
       setStatus("图解已生成", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
     });
   }
 
-  function renderExtractedColors() { els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${color.id}</label></div>`).join(""); els.modeBadge.textContent = state.mode === "dmc" ? "DMC 色卡" : "原图真实色"; }
+  function renderExtractedColors() {
+    els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
+    els.modeBadge.textContent = state.mode === "mard" ? `MARD ${activeMardPalette().length} 色` : "原图真实色";
+  }
 
   function renderPattern() {
     const { width, height, pattern } = state;
@@ -231,7 +446,12 @@
       const x = index % width, y = Math.floor(index / width), px = x * cellSize, py = y * cellSize;
       context.fillStyle = rgbCss(color.rgb); context.fillRect(px, py, cellSize, cellSize);
       context.strokeStyle = (x % 10 === 0 || y % 10 === 0) ? "rgba(37,34,26,.38)" : "rgba(37,34,26,.15)"; context.lineWidth = (x % 10 === 0 || y % 10 === 0) ? 1.2 : .55; context.strokeRect(px, py, cellSize, cellSize);
-      if (cellSize >= 10) { context.fillStyle = "rgba(20,20,17,.62)"; context.font = `700 ${Math.max(6, Math.floor(cellSize * .55))}px sans-serif`; context.textAlign = "center"; context.textBaseline = "middle"; context.fillText(symbolMap.get(color.id) || "·", px + cellSize / 2, py + cellSize / 2 + .5); }
+      if (cellSize >= 8) {
+        const label = els.showCodes.checked ? color.id : symbolMap.get(color.id) || "·";
+        context.fillStyle = contrastText(color.rgb);
+        context.font = `700 ${Math.max(5, Math.min(9, Math.floor(cellSize * (label.length > 2 ? .34 : .55))))}px sans-serif`;
+        context.textAlign = "center"; context.textBaseline = "middle"; context.fillText(label, px + cellSize / 2, py + cellSize / 2 + .5);
+      }
     });
     applyZoom(); els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色`;
   }
@@ -240,32 +460,173 @@
 
   function renderLegend() {
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
-    els.legend.innerHTML = state.selectedColors.map((color) => `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${color.id} · ${color.name}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small></div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`).join("");
+    els.legend.innerHTML = state.selectedColors.map((color) => `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small></div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`).join("");
   }
 
   function renderMaterials() {
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
     const total = state.pattern.length;
-    const rows = state.selectedColors.filter((color) => counts.has(color.id)).map((color) => { const count = counts.get(color.id); const length = count * .008; return { color, count, percent: count / total * 100, length }; }).sort((a, b) => b.count - a.count);
+    const density = Math.max(1, Number(els.density.value) || 20);
+    const rows = state.selectedColors.filter((color) => counts.has(color.id)).map((color) => { const count = counts.get(color.id); const length = count * (10 / density) * 0.016; return { color, count, percent: total ? count / total * 100 : 0, length }; }).sort((a, b) => b.count - a.count);
     state.stats = rows;
-    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${color.id}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`).join("");
+    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`).join("");
     els.totalStitches.textContent = total.toLocaleString();
   }
 
   function materialText() { return ["拼豆材料清单", `图纸：${state.width} × ${state.height}`, "", "颜色\t数量\t占比\t估算线长", ...state.stats.map(({ color, count, percent, length }) => `${color.id} ${color.name}\t${count}\t${percent.toFixed(2)}%\t${length.toFixed(2)}m`), "", `总针数\t${state.pattern.length}`].join("\n"); }
 
-  function download(name, content, type) { const blob = new Blob([content], { type }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }
-  function downloadJson() { download("perler-pattern.json", JSON.stringify({ width: state.width, height: state.height, mode: state.mode, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function saveBlob(name, blob) { const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }
+  function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
+  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD ${activeMardPalette().length}` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
+  // The PDF is assembled locally as vector drawing commands. It does not rasterize the
+  // preview, so each cell stays sharp when printed and carries its color code.
+  const PDF_WIDTH = 595.28;
+  const PDF_HEIGHT = 841.89;
+  const PDF_ENCODER = new TextEncoder();
+  function pdfNumber(value) { return Number(value).toFixed(3).replace(/\.?(0+)$/, ""); }
+  function pdfColor(rgb, operator = "rg") { return `${rgb.map((value) => (clamp(value) / 255).toFixed(4)).join(" ")} ${operator}`; }
+  function pdfEscape(value) { return String(value).replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, (character) => `\\${character}`); }
+  function pdfText(text, x, top, size, rgb = [39, 37, 31]) { return `${pdfColor(rgb)} BT /F1 ${pdfNumber(size)} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - top)} Tm (${pdfEscape(text)}) Tj ET`; }
+  function pdfFillRect(rgb, x, top, width, height) { return `${pdfColor(rgb)} ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - top - height)} ${pdfNumber(width)} ${pdfNumber(height)} re f`; }
+
+  function buildPdfCoverPage(cellsPerPage) {
+    const commands = ["q", pdfText("Perler Pattern", 40, 47, 22), pdfText("Vector grid PDF / every cell includes a color code", 40, 70, 9, [95, 91, 82]), pdfText(`Grid ${state.width} x ${state.height}    Cells ${state.pattern.length.toLocaleString()}    Page tile ${cellsPerPage} x ${cellsPerPage}`, 40, 96, 10, [95, 91, 82])];
+    let top = 135;
+    commands.push(pdfText("Material list", 40, top, 13));
+    top += 22;
+    state.stats.forEach(({ color, count, percent }) => {
+      commands.push(pdfFillRect(color.rgb, 42, top - 11, 15, 15));
+      commands.push(pdfText(`${color.id}  ${color.name}`, 67, top, 9));
+      commands.push(pdfText(`${count.toLocaleString()} beads   ${percent.toFixed(2)}%`, 365, top, 9, [95, 91, 82]));
+      top += 21;
+    });
+    commands.push(pdfText(`Palette: ${state.mode === "mard" ? `MARD ${activeMardPalette().length}` : "cluster colors"}`, 40, Math.min(top + 20, PDF_HEIGHT - 46), 9, [95, 91, 82]));
+    commands.push(pdfText("Print at 100% scale. Use the tile headers to assemble large patterns.", 40, PDF_HEIGHT - 25, 8, [130, 124, 113]), "Q");
+    return commands.join("\n");
+  }
+
+  function buildPdfGridPage(startX, startY, columns, rows) {
+    const marginX = 30;
+    const topReserved = 52;
+    const bottomReserved = 27;
+    const cellSize = Math.min((PDF_WIDTH - marginX * 2) / columns, (PDF_HEIGHT - topReserved - bottomReserved) / rows);
+    const gridWidth = cellSize * columns;
+    const gridHeight = cellSize * rows;
+    const originX = (PDF_WIDTH - gridWidth) / 2;
+    const originTop = topReserved + ((PDF_HEIGHT - topReserved - bottomReserved) - gridHeight) / 2;
+    const commands = ["q", pdfText(`Columns ${startX + 1}-${startX + columns}   Rows ${startY + 1}-${startY + rows}`, 30, 28, 9), pdfText("Every cell shows its color code", 390, 28, 8, [95, 91, 82])];
+
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const color = state.pattern[(startY + row) * state.width + startX + column];
+        if (!color) continue;
+        commands.push(pdfFillRect(color.rgb, originX + column * cellSize, originTop + row * cellSize, cellSize, cellSize));
+      }
+    }
+
+    commands.push(`${pdfColor([48, 45, 39], "RG")} ${pdfNumber(Math.max(.25, Math.min(.7, cellSize / 15)))} w`);
+    for (let column = 0; column <= columns; column++) {
+      const x = originX + column * cellSize;
+      commands.push(`${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - originTop)} m ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - originTop + gridHeight)} l`);
+    }
+    for (let row = 0; row <= rows; row++) {
+      const top = originTop + row * cellSize;
+      const y = PDF_HEIGHT - top;
+      commands.push(`${pdfNumber(originX)} ${pdfNumber(y)} m ${pdfNumber(originX + gridWidth)} ${pdfNumber(y)} l`);
+    }
+    commands.push("S");
+
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const color = state.pattern[(startY + row) * state.width + startX + column];
+        if (!color) continue;
+        const label = String(color.id || "?").slice(0, 8);
+        const size = Math.max(3.2, Math.min(8, cellSize * (label.length > 4 ? .28 : .36)));
+        const x = originX + column * cellSize + cellSize / 2 - label.length * size * .27;
+        const top = originTop + row * cellSize + cellSize / 2 + size * .34;
+        commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb)));
+      }
+    }
+    commands.push(pdfText("Perler Pattern", 30, PDF_HEIGHT - 11, 7, [130, 124, 113]), "Q");
+    return commands.join("\n");
+  }
+
+  function buildPdfFile(pages) {
+    const pageObjectNumbers = pages.map((_, index) => 4 + index * 2);
+    const objects = [];
+    objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+    objects[2] = `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${pages.length} >>`;
+    objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+    pages.forEach((content, index) => {
+      const pageNumber = pageObjectNumbers[index];
+      const contentNumber = pageNumber + 1;
+      const stream = `${content}\n`;
+      const length = PDF_ENCODER.encode(stream).length;
+      objects[pageNumber] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_WIDTH} ${PDF_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentNumber} 0 R >>`;
+      objects[contentNumber] = `<< /Length ${length} >>\nstream\n${stream}endstream`;
+    });
+
+    let output = "%PDF-1.4\n";
+    const offsets = new Array(objects.length).fill(0);
+    for (let objectNumber = 1; objectNumber < objects.length; objectNumber++) {
+      offsets[objectNumber] = PDF_ENCODER.encode(output).length;
+      output += `${objectNumber} 0 obj\n${objects[objectNumber]}\nendobj\n`;
+    }
+    const xrefOffset = PDF_ENCODER.encode(output).length;
+    output += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let objectNumber = 1; objectNumber < objects.length; objectNumber++) output += `${String(offsets[objectNumber]).padStart(10, "0")} 00000 n \n`;
+    output += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    return PDF_ENCODER.encode(output);
+  }
+
+  function exportPdf() {
+    if (!state.pattern.length) return showToast("请先生成拼豆图解");
+    const cellsPerPage = Number(els.pdfCellsPerPage.value) || 50;
+    els.downloadPdf.disabled = true;
+    setStatus("正在生成矢量 PDF…");
+    setTimeout(() => {
+      try {
+        const pages = [buildPdfCoverPage(cellsPerPage)];
+        for (let startY = 0; startY < state.height; startY += cellsPerPage) {
+          for (let startX = 0; startX < state.width; startX += cellsPerPage) pages.push(buildPdfGridPage(startX, startY, Math.min(cellsPerPage, state.width - startX), Math.min(cellsPerPage, state.height - startY)));
+        }
+        saveBlob(`perler-pattern-${state.width}x${state.height}.pdf`, new Blob([buildPdfFile(pages)], { type: "application/pdf" }));
+        setStatus("PDF 已生成", true);
+        showToast(`已导出 ${pages.length} 页矢量 PDF，每格包含色号`);
+      } catch (error) {
+        setStatus("PDF 导出失败");
+        showToast(`PDF 导出失败：${error.message || "浏览器内存不足"}`);
+      } finally {
+        els.downloadPdf.disabled = false;
+      }
+    }, 30);
+  }
+
+  els.paletteStatus.textContent = `内置公开参考色卡：${activeMardPalette().length} 色；如与实物卡不同，可导入准确的 CSV/JSON。`;
   els.imageInput.addEventListener("change", (event) => loadImage(event.target.files[0]));
   els.replaceImage.addEventListener("click", () => els.imageInput.click());
+  els.precisionSelect.addEventListener("change", applyPrecisionSelection);
+  [els.gridWidth, els.gridHeight].forEach((input) => input.addEventListener("input", markCustomPrecision));
+  els.bigjpgButton.addEventListener("click", () => {
+    const opened = window.open("https://bigjpg.com/", "_blank", "noopener,noreferrer");
+    if (!opened) showToast("请允许打开新窗口后访问 Bigjpg");
+    else showToast("请在 Bigjpg 放大并下载图片，再重新上传到本页");
+  });
+  els.paletteInput.addEventListener("change", (event) => importPaletteFile(event.target.files[0]));
   ["dragenter", "dragover"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.add("dragging"); }));
   ["dragleave", "drop"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.remove("dragging"); }));
   els.dropZone.addEventListener("drop", (event) => loadImage(event.dataTransfer.files[0]));
-  els.colorCount.addEventListener("input", () => { els.colorCountValue.textContent = els.colorCount.value; });
+  els.colorCount.addEventListener("input", () => { els.colorCountValue.textContent = els.colorCount.value; markPatternStale("颜色数已改变，请重新生成图解"); });
+  els.paletteStyle.addEventListener("change", () => markPatternStale("颜色风格已改变，请重新生成图解"));
+  [els.denoise, els.dither, els.majorityFilter].forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
+  $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials); els.zoom.addEventListener("input", applyZoom);
-  els.downloadPng.addEventListener("click", () => { if (state.pattern.length) els.canvas.toBlob((blob) => { const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "perler-pattern.png"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }, "image/png"); });
+  els.downloadPng.addEventListener("click", () => { if (state.pattern.length) els.canvas.toBlob((blob) => saveBlob(`perler-pattern-${state.width}x${state.height}.png`, blob), "image/png"); });
+  els.downloadPdf.addEventListener("click", exportPdf);
   els.downloadJson.addEventListener("click", downloadJson);
+  els.showCodes.addEventListener("change", () => { if (state.pattern.length) renderPattern(); });
+  els.density.addEventListener("input", () => { if (state.pattern.length) renderMaterials(); });
   els.copyMaterials.addEventListener("click", async () => { try { await navigator.clipboard.writeText(materialText()); showToast("材料清单已复制"); } catch { showToast("当前浏览器不允许复制，请使用导出数据"); } });
-  $$('input[name="colorMode"]').forEach((input) => input.addEventListener("change", () => { $$(".radio-card").forEach((card) => card.classList.toggle("selected", card.querySelector("input").checked)); }));
+  $$('input[name="colorMode"]').forEach((input) => input.addEventListener("change", () => { $$(".radio-card").forEach((card) => card.classList.toggle("selected", card.querySelector("input").checked)); markPatternStale("颜色模式已改变，请重新生成图解"); }));
 })();
