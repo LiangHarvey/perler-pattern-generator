@@ -5,7 +5,7 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), base24Substitute: $("#base24Substitute"), over500Substitute: $("#over500Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
+    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), over500Substitute: $("#over500Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
     showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
@@ -193,11 +193,7 @@
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character])); }
   function contrastText(rgb) { return (.299 * rgb[0] + .587 * rgb[1] + .114 * rgb[2]) > 158 ? "#273025" : "#fffdf7"; }
   function contrastRgb(rgb) { return contrastText(rgb) === "#273025" ? [39, 48, 37] : [255, 253, 247]; }
-  function getMode() {
-    const input = $("input[name='colorMode']:checked");
-    const value = input ? input.value : "mard";
-    return value === "dmc" ? "mard" : value;
-  }
+  function getMode() { return "mard"; }
   function getEdgeMode() { return $("input[name='edgeMode']:checked").value; }
   function getPaletteStyle() { return els.paletteStyle ? els.paletteStyle.value : "all"; }
   function showToast(message) {
@@ -343,14 +339,14 @@
     const validation = skuPaletteValidation(colorCount);
     if (!validation.missingIds.length) {
       els.paletteValidation.classList.remove("warning");
-      els.paletteValidation.textContent = `${colorCount} 色 SKU：图1区域中的 ${validation.matchedPalette.length} 个色号均已匹配图2/3 HEX 与 RGB。`;
+      els.paletteValidation.textContent = `${colorCount} 色 SKU：${validation.matchedPalette.length} 个色号均已匹配有效 HEX 与 RGB。`;
       return;
     }
     els.paletteValidation.classList.add("warning");
     const mapped = validation.proxyMappings.filter((item) => item.replacement);
     const unmapped = validation.proxyMappings.filter((item) => !item.replacement).map((item) => item.missingId);
     const mappingText = mapped.map((item) => `${item.missingId}→${item.replacement.id}(ΔE ${item.distance.toFixed(1)})`).join("、");
-    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，图2/3已匹配 ${validation.matchedPalette.length} 色；缺失 ${validation.missingIds.length} 色已按相近有效色号替代：${mappingText}${unmapped.length ? `；仍无法替代：${unmapped.join("、")}` : ""}。`;
+    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，已匹配 ${validation.matchedPalette.length} 色；缺失 ${validation.missingIds.length} 色已按相近有效色号替代：${mappingText}${unmapped.length ? `；仍无法替代：${unmapped.join("、")}` : ""}。`;
   }
 
   function paletteForColorCount(colorCount) {
@@ -362,26 +358,23 @@
   }
 
   function applyBase24Substitutions(pattern, mode, requestedColorCount) {
-    const regularEnabled = Boolean(els.base24Substitute && els.base24Substitute.checked);
     const over500Enabled = Boolean(els.over500Substitute && els.over500Substitute.checked);
-    if (mode !== "mard" || requestedColorCount <= 24 || (!regularEnabled && !over500Enabled)) return { pattern, substitutions: [] };
+    if (mode !== "mard" || requestedColorCount <= 24 || !over500Enabled) return { pattern, substitutions: [] };
     const basePalette = paletteForColorCount(24);
     const baseIds = new Set(basePalette.map((color) => canonicalMardId(color.id)));
     const counts = new Map();
     const sourceColors = new Map();
     pattern.forEach((color) => { counts.set(color.id, (counts.get(color.id) || 0) + 1); sourceColors.set(color.id, color); });
-    const minimumCount = Math.max(10, Math.ceil(pattern.length * .005));
     const replacements = new Map();
     const substitutions = [];
     [...counts.entries()].sort((a, b) => b[1] - a[1]).forEach(([sourceId, count]) => {
       if (baseIds.has(canonicalMardId(sourceId))) return;
       const sourceColor = sourceColors.get(sourceId);
       const match = nearestMardMatch(sourceColor.rgb, basePalette);
-      const regularMatch = regularEnabled && count >= minimumCount && match.distance <= 6;
       const over500Match = over500Enabled && count > 500 && match.distance <= 10;
-      if (!match.color || (!regularMatch && !over500Match)) return;
+      if (!match.color || !over500Match) return;
       replacements.set(sourceId, match.color);
-      substitutions.push({ from: sourceColor, to: match.color, count, distance: match.distance, reason: over500Match ? "over500" : "highUsage" });
+      substitutions.push({ from: sourceColor, to: match.color, count, distance: match.distance, reason: "over500" });
     });
     return { pattern: replacements.size ? pattern.map((color) => replacements.get(color.id) || color) : pattern, substitutions };
   }
@@ -663,7 +656,6 @@
   }
 
   function buildSelectedColors(clusters, mode, style, desiredCount, pixels = [], rankedPalette = null, candidatePalette = null) {
-    if (mode === "original") return clusters.slice(0, desiredCount).map((cluster, index) => ({ id: `C${String(index + 1).padStart(2, "0")}`, name: `真实色${index + 1}`, rgb: cluster.rgb, lab: rgbToLab(cluster.rgb), original: true }));
     const palette = candidatePalette || paletteForStyle(style);
     // Rank the complete MARD palette against the actual grid pixels first. This
     // preserves frequent highlight/shadow colors better than choosing a single
@@ -693,7 +685,7 @@
       for (let x = 0; x < width; x++) {
         const index = y * width + x;
         const rgb = working[index].map((v) => clamp(v));
-        const color = nearestColor(rgb, colorObjects, mode === "mard");
+        const color = nearestColor(rgb, colorObjects, true);
         pattern[index] = color;
         if (useDither) {
           const error = rgb.map((v, i) => v - color.rgb[i]);
@@ -751,18 +743,12 @@
   }
 
   function analyzePixels(pixels, desiredCount) {
-    const mode = getMode();
+    const mode = "mard";
     const style = getPaletteStyle();
     const sampledPixels = pixels.filter((_, index) => index % Math.max(1, Math.floor(pixels.length / 6000)) === 0);
-    let rankedPalette = null;
-    const candidatePalette = mode === "mard" ? paletteForColorCount(desiredCount) : null;
-    let clusters;
-    if (mode === "mard") {
-      rankedPalette = paletteFrequencyOrder(pixels, candidatePalette);
-      clusters = rankedPalette.slice(0, desiredCount).map(({ color, count }) => ({ rgb: color.rgb, count }));
-    } else {
-      clusters = desiredCount > 48 ? histogramClusters(sampledPixels, desiredCount) : kmeans(sampledPixels, desiredCount);
-    }
+    const candidatePalette = paletteForColorCount(desiredCount);
+    const rankedPalette = paletteFrequencyOrder(pixels, candidatePalette);
+    const clusters = rankedPalette.slice(0, desiredCount).map(({ color, count }) => ({ rgb: color.rgb, count }));
     return { mode, style, clusters, selectedColors: buildSelectedColors(clusters, mode, style, desiredCount, pixels, rankedPalette, candidatePalette) };
   }
 
@@ -834,7 +820,7 @@
   function renderExtractedColors() {
     if (els.extractedColors) els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
     if (els.extractedResultSummary) els.extractedResultSummary.textContent = state.selectedColors.length ? `${state.selectedColors.length} 色 · 点击展开查看` : "尚未提取";
-    if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（卡组限定）` : "原图真实色";
+    if (els.modeBadge) els.modeBadge.textContent = `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（SKU限定）`;
   }
 
   const MARD_FAMILY_NAMES = Object.freeze({
@@ -849,7 +835,6 @@
   }
 
   function colorFamilyName(color) {
-    if (state.mode !== "mard") return "原图色";
     return MARD_FAMILY_NAMES[mardSeries(color.id)] || "标准色";
   }
 
@@ -1076,7 +1061,7 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { const skuValidation = state.mode === "mard" ? skuPaletteValidation(state.requestedColorCount) : null; download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", missingSkuColorProxies: skuValidation ? skuValidation.proxyMappings.filter((item) => item.replacement).map((item) => ({ missingId: item.missingId, replacementId: item.replacement.id, distance: item.distance })) : [], base24Substitution: { enabled: Boolean((els.base24Substitute && els.base24Substitute.checked) || (els.over500Substitute && els.over500Substitute.checked)), rules: { highUsage: { minimumShare: .005, minimumBeads: 10, maximumDeltaE2000: 6 }, over500: { minimumBeadsExclusive: 500, maximumDeltaE2000: 10 } }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { const skuValidation = skuPaletteValidation(state.requestedColorCount); download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: "mard", palette: `MARD SKU ${state.requestedColorCount || state.selectedColors.length}`, missingSkuColorProxies: skuValidation.proxyMappings.filter((item) => item.replacement).map((item) => ({ missingId: item.missingId, replacementId: item.replacement.id, distance: item.distance })), base24Substitution: { enabled: Boolean(els.over500Substitute && els.over500Substitute.checked), rules: { minimumBeadsExclusive: 500, maximumDeltaE2000: 10 }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
@@ -1143,7 +1128,7 @@
     const originTop = boardTop + layout.originY;
     const gridWidth = layout.gridWidth;
     const gridHeight = layout.gridHeight;
-    const paletteName = state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors";
+    const paletteName = `MARD SKU ${state.requestedColorCount || state.selectedColors.length}`;
     const commands = [
       "q",
       pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight),
@@ -1304,7 +1289,7 @@
     updateQualityInfo();
   }));
   if (els.paletteStyle) els.paletteStyle.addEventListener("change", () => markPatternStale("颜色参数已改变，请重新生成图解"));
-  [els.denoise, els.dither, els.majorityFilter, els.base24Substitute, els.over500Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
+  [els.denoise, els.dither, els.majorityFilter, els.over500Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
   els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });
@@ -1314,7 +1299,6 @@
   if (els.showCodes) els.showCodes.addEventListener("change", () => { if (state.pattern.length) renderPattern(); });
   els.density.addEventListener("input", () => { if (state.pattern.length) renderMaterials(); });
   els.copyMaterials.addEventListener("click", async () => { try { await navigator.clipboard.writeText(materialText()); showToast("材料清单已复制"); } catch { showToast("当前浏览器不允许复制，请使用导出数据"); } });
-  $$('input[name="colorMode"]').forEach((input) => input.addEventListener("change", () => { $$(".radio-card").forEach((card) => card.classList.toggle("selected", card.querySelector("input").checked)); markPatternStale("颜色模式已改变，请重新生成图解"); }));
   if (els.toggleControls) els.toggleControls.addEventListener("click", () => {
     const hideControls = !els.appShell.classList.contains("hide-controls");
     setSidebarsHidden(hideControls, els.appShell.classList.contains("hide-results"));

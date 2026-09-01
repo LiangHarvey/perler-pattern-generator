@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8f5ef" />
     <title>拼豆图纸生成器</title>
-    <link rel="stylesheet" href="styles.css?v=0.6.1" />
+    <link rel="stylesheet" href="styles.css?v=0.6.2" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.1</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.2</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -52,7 +52,7 @@
         </section>
 
         <section class="step-card">
-        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD SKU + 图2/3色值</span></div>
+        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD SKU 标准色</span></div>
         <label class="select-field"><span>使用 MARD 色数 <small>标准色卡档位</small></span><select id="colorCount">
           <option value="24">24 色 · 基础精度</option>
           <option value="48">48 色 · 细节增强</option>
@@ -63,13 +63,10 @@
           <option value="216">216 色 · 极高精度</option>
           <option value="264">264 色 · MARD 高精度全色档</option>
         </select></label>
-          <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
-          <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD SKU 标准色卡</strong><small>图2/3已匹配 221 色 · 每格对应 MARD 色号</small></span></label>
-          <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
+          <p class="label-title">颜色标准</p>
+          <div class="radio-card selected"><span><strong>MARD SKU 标准色卡</strong><small>每个格子对应可采购的 MARD 色号</small></span></div>
           <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，并通过 CIEDE2000 感知色差精确匹配色号，不会调用档位外的颜色。</p>
           <div id="paletteValidation" class="palette-validation" role="status">正在校验 SKU 色号与 HEX/RGB…</div>
-          <label class="check-row base24-option"><input id="base24Substitute" type="checkbox" /><span>24色基础色优先替代 <em>（仅替代高用量且足够相近的颜色）</em></span></label>
-          <p class="hint">按用量从高到低检查：用量≥整图0.5%且≥10颗、与24色基础色的 CIEDE2000 色差≤6 才会替代；替代关系会写入图例、图纸底部及导出文件。</p>
           <label class="check-row base24-option"><input id="over500Substitute" type="checkbox" /><span>超过500颗时替换为24色 <em>（相近颜色优先）</em></span></label>
           <p class="hint">单个非基础色用量超过500颗时，若与24色基础色的 CIEDE2000 色差≤10，则替换并标注原色号、基础色号、数量和色差。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
@@ -141,8 +138,8 @@
     <div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
       <div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><strong id="loadingTitle">正在处理</strong><span id="loadingDetail">请稍候，处理完成前页面不会响应其他操作。</span></div>
     </div>
-  <script src="mard-palette.js?v=0.6.1"></script>
-  <script src="mard-reference-221.js?v=0.6.1"></script>
-  <script src="app.js?v=0.6.1"></script>
+  <script src="mard-palette.js?v=0.6.2"></script>
+  <script src="mard-reference-221.js?v=0.6.2"></script>
+  <script src="app.js?v=0.6.2"></script>
   </body>
 </html>
