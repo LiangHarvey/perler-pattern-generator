@@ -9,7 +9,8 @@
     paletteInput: $("#paletteInput"), paletteStatus: $("#paletteStatus"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
-    showCodes: $("#showCodes"), pdfCellsPerPage: $("#pdfCellsPerPage"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast")
+    showCodes: $("#showCodes"), pdfCellsPerPage: $("#pdfCellsPerPage"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"),
+    appShell: $(".app-shell"), controlsPanel: $(".controls-panel"), resultsPanel: $(".results-panel"), toggleControls: $("#toggleControls"), toggleResults: $("#toggleResults"), fitPattern: $("#fitPattern")
   };
 
   const DMC = [
@@ -27,8 +28,9 @@
   const SYMBOLS = ["●", "▲", "■", "◆", "✚", "✦", "○", "△", "□", "◇", "★", "※"];
   let sourceImage = null;
   let sourceFile = null;
+  let sourceBounds = null;
   let customMardPalette = null;
-  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", stats: [] };
+  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", stats: [], autoFit: false };
   let toastTimer;
 
   // RGB -> LAB gives a perceptual distance that is more useful for color matching than raw RGB.
@@ -50,35 +52,89 @@
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character])); }
   function contrastText(rgb) { return (.299 * rgb[0] + .587 * rgb[1] + .114 * rgb[2]) > 158 ? "#273025" : "#fffdf7"; }
   function contrastRgb(rgb) { return contrastText(rgb) === "#273025" ? [39, 48, 37] : [255, 253, 247]; }
-  function getMode() { return $("input[name='colorMode']:checked").value; }
+  function getMode() {
+    const input = $("input[name='colorMode']:checked");
+    const value = input ? input.value : "mard";
+    return value === "dmc" ? "mard" : value;
+  }
   function getEdgeMode() { return $("input[name='edgeMode']:checked").value; }
+  function getPaletteStyle() { return els.paletteStyle ? els.paletteStyle.value : "all"; }
   function showToast(message) { clearTimeout(toastTimer); els.toast.textContent = message; els.toast.classList.add("show"); toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2600); }
   function setStatus(message, ready = false) { els.statusText.textContent = message; els.liveDot.classList.toggle("ready", ready); }
   function setDisabled(element, disabled) { if (element) element.disabled = disabled; }
   function validDimension(input, fallback) { const n = Number(input.value); return Number.isFinite(n) ? Math.max(8, Math.min(240, Math.round(n))) : fallback; }
+
+  function sourceContentBounds() {
+    if (!sourceImage) return { x: 0, y: 0, width: 1, height: 1 };
+    return sourceBounds || { x: 0, y: 0, width: sourceImage.naturalWidth, height: sourceImage.naturalHeight };
+  }
+
+  function detectContentBounds(image) {
+    const full = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
+    try {
+      const sampleWidth = Math.min(220, image.naturalWidth);
+      const sampleHeight = Math.max(1, Math.round(image.naturalHeight * sampleWidth / image.naturalWidth));
+      const sampleCanvas = document.createElement("canvas");
+      sampleCanvas.width = sampleWidth; sampleCanvas.height = sampleHeight;
+      const context = sampleCanvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return full;
+      context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+      const data = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+      const lineStats = (line, horizontal) => {
+        const count = horizontal ? sampleWidth : sampleHeight;
+        let r = 0, g = 0, b = 0;
+        for (let index = 0; index < count; index++) {
+          const x = horizontal ? index : line;
+          const y = horizontal ? line : index;
+          const offset = (y * sampleWidth + x) * 4;
+          r += data[offset]; g += data[offset + 1]; b += data[offset + 2];
+        }
+        const mean = [r / count, g / count, b / count];
+        let variance = 0;
+        for (let index = 0; index < count; index++) {
+          const x = horizontal ? index : line;
+          const y = horizontal ? line : index;
+          const offset = (y * sampleWidth + x) * 4;
+          const luminance = data[offset] * .299 + data[offset + 1] * .587 + data[offset + 2] * .114;
+          const meanLuminance = mean[0] * .299 + mean[1] * .587 + mean[2] * .114;
+          variance += (luminance - meanLuminance) ** 2;
+        }
+        return { mean, luminance: mean[0] * .299 + mean[1] * .587 + mean[2] * .114, variance: variance / count };
+      };
+      const topReference = lineStats(0, true);
+      const bottomReference = lineStats(sampleHeight - 1, true);
+      const colorDistanceRgb = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      const isNeutralBar = (stats, reference) => {
+        const neutral = stats.luminance <= 24 || stats.luminance >= 238;
+        return neutral && stats.variance < 120 && colorDistanceRgb(stats.mean, reference.mean) < 35;
+      };
+      let top = 0;
+      while (top < sampleHeight && isNeutralBar(lineStats(top, true), topReference)) top++;
+      let bottom = sampleHeight - 1;
+      while (bottom >= 0 && isNeutralBar(lineStats(bottom, true), bottomReference)) bottom--;
+      const hasTopBar = top > sampleHeight * .02;
+      const hasBottomBar = sampleHeight - 1 - bottom > sampleHeight * .02;
+      const sameBarColor = colorDistanceRgb(topReference.mean, bottomReference.mean) < 35;
+      if (hasTopBar && hasBottomBar && sameBarColor && bottom > top) {
+        return { x: 0, y: Math.round(top / sampleHeight * image.naturalHeight), width: image.naturalWidth, height: Math.round((bottom - top + 1) / sampleHeight * image.naturalHeight) };
+      }
+    } catch (error) {
+      // A browser may reject pixel reads for unusual local image formats; use the full image then.
+    }
+    return full;
+  }
 
   function activeMardPalette() {
     const palette = customMardPalette || window.MARD_PALETTE_280 || DMC;
     return palette.length ? palette : DMC;
   }
 
-  const STYLE_SERIES = {
-    warm: new Set(["A", "E", "F", "G", "M"]),
-    natural: new Set(["B", "C", "G", "H", "M"]),
-    fresh: new Set(["B", "C", "D", "E", "P", "R", "Y"]),
-    vivid: new Set(["A", "B", "C", "D", "E", "F", "R"])
-  };
-
-  function paletteForStyle(style) {
-    const palette = activeMardPalette();
-    if (style === "all") return palette;
-    const filtered = palette.filter((color) => (color.tags || []).includes(style) || (STYLE_SERIES[style] && STYLE_SERIES[style].has(color.series)));
-    return filtered.length >= 3 ? filtered : palette;
-  }
+  function paletteForStyle() { return activeMardPalette(); }
 
   function gridForShortSide(shortSide) {
-    const sourceWidth = sourceImage.naturalWidth;
-    const sourceHeight = sourceImage.naturalHeight;
+    const bounds = sourceContentBounds();
+    const sourceWidth = bounds.width;
+    const sourceHeight = bounds.height;
     let width = sourceWidth >= sourceHeight ? Math.round(shortSide * sourceWidth / sourceHeight) : shortSide;
     let height = sourceWidth >= sourceHeight ? shortSide : Math.round(shortSide * sourceHeight / sourceWidth);
     const fit = Math.min(240 / width, 240 / height, 1);
@@ -91,23 +147,26 @@
     if (!sourceImage || !els.qualityInfo) return;
     const sourceWidth = sourceImage.naturalWidth;
     const sourceHeight = sourceImage.naturalHeight;
+    const bounds = sourceContentBounds();
     const width = validDimension(els.gridWidth, 120);
     const height = validDimension(els.gridHeight, 140);
-    const pixelsPerBead = Math.min(sourceWidth / width, sourceHeight / height);
-    const sourceShortSide = Math.min(sourceWidth, sourceHeight);
+    const pixelsPerBead = Math.min(bounds.width / width, bounds.height / height);
+    const sourceShortSide = Math.min(bounds.width, bounds.height);
     const isLowResolution = sourceShortSide < 128 || pixelsPerBead < 2;
     const resolutionText = pixelsPerBead >= 1 ? `${pixelsPerBead.toFixed(1)} px/格` : "低于 1 px/格";
-    els.qualityInfo.innerHTML = `<strong>原图 ${sourceWidth} × ${sourceHeight}px</strong> · 当前 ${width} × ${height} 格 · ${resolutionText}<br>${isLowResolution ? "原图细节不足，建议先用 Bigjpg 放大后再生成。" : "已按原图比例计算选项，越往下精度越高、格子越多。"}`;
+    const cropText = bounds.height < sourceHeight * .98 ? ` · 有效画面 ${Math.round(bounds.width)} × ${Math.round(bounds.height)}px` : "";
+    els.qualityInfo.innerHTML = `<strong>原图 ${sourceWidth} × ${sourceHeight}px</strong>${cropText}<br>当前 ${width} × ${height} 格 · ${resolutionText}<br>${isLowResolution ? "原图细节不足，建议先用 Bigjpg 放大后再生成。" : "已按有效画面比例计算选项，越往下精度越高、格子越多。"}`;
     els.qualityInfo.classList.remove("hidden");
     els.qualityInfo.classList.toggle("warning", isLowResolution);
   }
 
   function populatePrecisionOptions() {
     if (!sourceImage || !els.precisionSelect) return;
-    const sourceShortSide = Math.min(sourceImage.naturalWidth, sourceImage.naturalHeight);
+    const bounds = sourceContentBounds();
+    const sourceShortSide = Math.min(bounds.width, bounds.height);
     // Two source pixels per bead is a practical upper bound for a stable automatic choice.
     const recommendedMax = Math.max(8, Math.min(240, Math.floor(sourceShortSide / 2)));
-    const candidateShortSides = [20, 30, 40, 50, 60, 80, 100, 120, 160, 200, 240]
+    const candidateShortSides = [24, 40, 60, 80, 100, 120, 150, 180, 200, 240]
       .filter((value) => value <= recommendedMax);
     if (!candidateShortSides.length || candidateShortSides[candidateShortSides.length - 1] !== recommendedMax) candidateShortSides.push(recommendedMax);
 
@@ -119,12 +178,14 @@
       if (seen.has(key)) return;
       seen.add(key);
       const level = index === 0 ? "低精度" : index === candidateShortSides.length - 1 ? "高精度" : `精度 ${index}`;
-      options.push({ ...grid, label: `${level} · ${grid.width} × ${grid.height} 格（约 ${(grid.width * grid.height).toLocaleString()} 颗）` });
+      options.push({ ...grid, shortSide, label: `${level} · ${grid.width} × ${grid.height} 格（约 ${(grid.width * grid.height).toLocaleString()} 颗）` });
     });
 
     els.precisionSelect.innerHTML = options.map((option) => `<option value="${option.width}x${option.height}" data-width="${option.width}" data-height="${option.height}">${option.label}</option>`).join("") + '<option value="custom">自定义网格（手动输入）</option>';
-    // Keep the default readable on mobile while still adapting to the source image.
-    const defaultOption = options[Math.min(4, options.length - 1)];
+    // Prefer a 150-bead short side when the source contains enough pixels; this is a
+    // useful photo-pattern compromise and matches the reference pattern scale.
+    const preferredShortSide = Math.min(150, recommendedMax);
+    const defaultOption = options.reduce((best, option) => !best || Math.abs(option.shortSide - preferredShortSide) < Math.abs(best.shortSide - preferredShortSide) ? option : best, null);
     if (defaultOption) {
       els.precisionSelect.value = `${defaultOption.width}x${defaultOption.height}`;
       els.gridWidth.value = defaultOption.width;
@@ -159,15 +220,62 @@
     updateQualityInfo();
   }
 
+  function setSidebarsHidden(hideControls, hideResults, refit = true) {
+    if (!els.appShell) return;
+    els.appShell.classList.toggle("hide-controls", hideControls);
+    els.appShell.classList.toggle("hide-results", hideResults);
+    if (els.toggleControls) {
+      els.toggleControls.textContent = hideControls ? "显示设置" : "隐藏设置";
+      els.toggleControls.setAttribute("aria-expanded", String(!hideControls));
+    }
+    if (els.toggleResults) {
+      els.toggleResults.textContent = hideResults ? "显示结果" : "隐藏结果";
+      els.toggleResults.setAttribute("aria-expanded", String(!hideResults));
+    }
+    if (refit && state.pattern.length) scheduleFitPattern();
+  }
+
+  function applyZoom() {
+    if (!els.zoom || !els.canvas) return;
+    const percent = Number(els.zoom.value) || 90;
+    const scale = percent / 100;
+    if (els.zoomValue) {
+      els.zoomValue.value = `${percent}%`;
+      els.zoomValue.textContent = `${percent}%`;
+    }
+    els.canvas.style.transform = `scale(${scale})`;
+    els.canvas.style.transformOrigin = "center center";
+    els.canvas.style.margin = `${Math.max(0, (scale - 1) * 100)}px`;
+  }
+
+  function fitPatternToViewport() {
+    if (!state.pattern.length || !els.canvasViewport || !els.canvas || !els.zoom) return;
+    const availableWidth = els.canvasViewport.clientWidth - 42;
+    const availableHeight = els.canvasViewport.clientHeight - 42;
+    if (availableWidth <= 0 || availableHeight <= 0 || !els.canvas.width || !els.canvas.height) return;
+    const scale = Math.min(1, availableWidth / els.canvas.width, availableHeight / els.canvas.height);
+    const percent = Math.round(Math.max(10, Math.min(150, scale * 100)));
+    state.autoFit = true;
+    els.zoom.value = String(percent);
+    applyZoom();
+  }
+
+  function scheduleFitPattern() {
+    if (!state.pattern.length) return;
+    requestAnimationFrame(() => requestAnimationFrame(fitPatternToViewport));
+  }
+
   function loadImage(file) {
-    if (!file || !file.type.startsWith("image/")) { showToast("请选择 JPG、PNG 或 WEBP 图片"); return; }
+    const isImage = file && ((file.type && file.type.startsWith("image/")) || /\.(png|jpe?g|webp|gif)$/i.test(file.name || ""));
+    if (!isImage) { showToast("请选择 JPG、PNG 或 WEBP 图片"); return; }
     sourceFile = file;
     const reader = new FileReader();
     reader.onload = () => {
       const image = new Image();
       image.onload = () => {
         sourceImage = image;
-        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0 };
+        sourceBounds = detectContentBounds(image);
+        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0, autoFit: false };
         els.sourceThumb.src = image.src;
         els.fileName.textContent = file.name;
         els.fileDimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}px`;
@@ -187,6 +295,7 @@
         if (els.legend) els.legend.innerHTML = '<div class="empty-result">生成图解后显示颜色图例</div>';
         if (els.materialsBody) els.materialsBody.innerHTML = '<tr><td colspan="4" class="empty-result">暂无数据</td></tr>';
         if (els.totalStitches) els.totalStitches.textContent = "—";
+        setSidebarsHidden(false, false, false);
         populatePrecisionOptions();
         setStatus("图片已载入，等待生成", true);
         showToast("图片已载入，可以开始提取主色");
@@ -297,14 +406,23 @@
     const offscreen = document.createElement("canvas");
     offscreen.width = width; offscreen.height = height;
     const context = offscreen.getContext("2d", { willReadFrequently: true });
-    const sourceRatio = sourceImage.naturalWidth / sourceImage.naturalHeight;
+    const bounds = sourceContentBounds();
+    const sourceRatio = bounds.width / bounds.height;
     const targetRatio = width / height;
-    let sx = 0, sy = 0, sw = sourceImage.naturalWidth, sh = sourceImage.naturalHeight;
-    if (sourceRatio > targetRatio) { sw = sourceImage.naturalHeight * targetRatio; sx = (sourceImage.naturalWidth - sw) / 2; }
-    else { sh = sourceImage.naturalWidth / targetRatio; sy = (sourceImage.naturalHeight - sh) / 2; }
+    let sx = bounds.x, sy = bounds.y, sw = bounds.width, sh = bounds.height;
+    if (sourceRatio > targetRatio) { sw = bounds.height * targetRatio; sx = bounds.x + (bounds.width - sw) / 2; }
+    else { sh = bounds.width / targetRatio; sy = bounds.y + (bounds.height - sh) / 2; }
     context.imageSmoothingEnabled = true;
     context.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, width, height);
     return context.getImageData(0, 0, width, height).data;
+  }
+
+  function denoiseRadius(width, height) {
+    if (!els.denoise || !els.denoise.checked) return 0;
+    const bounds = sourceContentBounds();
+    // The canvas downsample already performs area averaging. Only blur when a grid
+    // cell contains fewer than two source pixels; otherwise fine facial details blur.
+    return Math.min(bounds.width / width, bounds.height / height) < 2 ? 1 : 0;
   }
 
   function averageGridColor(data, width, height, x, y, radius = 0) {
@@ -404,10 +522,10 @@
     requestAnimationFrame(() => {
       const data = drawSourceToGrid(width, height);
       const pixels = [];
-      const radius = els.denoise.checked ? 1 : 0;
+      const radius = denoiseRadius(width, height);
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
       const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), colorCount);
-      const mode = getMode(), style = els.paletteStyle.value;
+      const mode = getMode(), style = getPaletteStyle();
       state.clusters = clusters; state.selectedColors = buildSelectedColors(clusters, mode, style, colorCount); state.mode = mode; state.paletteStyle = style; state.width = width; state.height = height; state.sourcePixels = pixels;
       renderExtractedColors();
       setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
@@ -421,21 +539,24 @@
     setStatus("正在生成图解…");
     requestAnimationFrame(() => {
       const data = drawSourceToGrid(width, height), pixels = [];
-      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, els.denoise.checked ? 1 : 0));
+      const radius = denoiseRadius(width, height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
       const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), Number(els.colorCount.value));
-      const mode = getMode(), selectedColors = buildSelectedColors(clusters, mode, els.paletteStyle.value, Number(els.colorCount.value));
+      const mode = getMode(), style = getPaletteStyle(), selectedColors = buildSelectedColors(clusters, mode, style, Number(els.colorCount.value));
       let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
       if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
-      state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: els.paletteStyle.value, sourcePixels: pixels };
+      state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, sourcePixels: pixels };
       renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
       setDisabled(els.downloadPng, false); setDisabled(els.downloadPdf, false); setDisabled(els.downloadJson, false); setDisabled(els.copyMaterials, false);
-      setStatus("图解已生成", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
+      setSidebarsHidden(true, true, false);
+      setStatus("图解已生成，侧栏已隐藏", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
+      scheduleFitPattern();
     });
   }
 
   function renderExtractedColors() {
     els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
-    els.modeBadge.textContent = state.mode === "mard" ? `MARD ${activeMardPalette().length} 色` : "原图真实色";
+    if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${activeMardPalette().length} 色` : "原图真实色";
   }
 
   function renderPattern() {
@@ -457,8 +578,6 @@
     });
     applyZoom(); els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色`;
   }
-
-  function applyZoom() { const scale = Number(els.zoom.value) / 100; els.zoomValue.value = `${els.zoom.value}%`; els.zoomValue.textContent = `${els.zoom.value}%`; els.canvas.style.transform = `scale(${scale})`; els.canvas.style.transformOrigin = "center center"; els.canvas.style.margin = `${Math.max(0, (scale - 1) * 100)}px`; }
 
   function renderLegend() {
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
@@ -483,78 +602,67 @@
 
   // The PDF is assembled locally as vector drawing commands. It does not rasterize the
   // preview, so each cell stays sharp when printed and carries its color code.
-  const PDF_WIDTH = 595.28;
-  const PDF_HEIGHT = 841.89;
+  const PDF_MIN_WIDTH = 595.28;
+  const PDF_MIN_HEIGHT = 841.89;
   const PDF_ENCODER = new TextEncoder();
   function pdfNumber(value) { return Number(value).toFixed(3).replace(/\.?(0+)$/, ""); }
   function pdfColor(rgb, operator = "rg") { return `${rgb.map((value) => (clamp(value) / 255).toFixed(4)).join(" ")} ${operator}`; }
   function pdfEscape(value) { return String(value).replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, (character) => `\\${character}`); }
-  function pdfText(text, x, top, size, rgb = [39, 37, 31]) { return `${pdfColor(rgb)} BT /F1 ${pdfNumber(size)} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - top)} Tm (${pdfEscape(text)}) Tj ET`; }
-  function pdfFillRect(rgb, x, top, width, height) { return `${pdfColor(rgb)} ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - top - height)} ${pdfNumber(width)} ${pdfNumber(height)} re f`; }
+  function pdfText(text, x, top, size, rgb = [39, 37, 31], pageHeight = PDF_MIN_HEIGHT) { return `${pdfColor(rgb)} BT /F1 ${pdfNumber(size)} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(pageHeight - top)} Tm (${pdfEscape(text)}) Tj ET`; }
+  function pdfFillRect(rgb, x, top, width, height, pageHeight = PDF_MIN_HEIGHT) { return `${pdfColor(rgb)} ${pdfNumber(x)} ${pdfNumber(pageHeight - top - height)} ${pdfNumber(width)} ${pdfNumber(height)} re f`; }
 
-  function buildPdfCoverPage(cellsPerPage) {
-    const commands = ["q", pdfText("Perler Pattern", 40, 47, 22), pdfText("Vector grid PDF / every cell includes a color code", 40, 70, 9, [95, 91, 82]), pdfText(`Grid ${state.width} x ${state.height}    Cells ${state.pattern.length.toLocaleString()}    Page tile ${cellsPerPage} x ${cellsPerPage}`, 40, 96, 10, [95, 91, 82])];
-    let top = 135;
-    commands.push(pdfText("Material list", 40, top, 13));
-    top += 22;
-    state.stats.forEach(({ color, count, percent }) => {
-      commands.push(pdfFillRect(color.rgb, 42, top - 11, 15, 15));
-      commands.push(pdfText(`${color.id}  ${color.name}`, 67, top, 9));
-      commands.push(pdfText(`${count.toLocaleString()} beads   ${percent.toFixed(2)}%`, 365, top, 9, [95, 91, 82]));
-      top += 21;
-    });
-    commands.push(pdfText(`Palette: ${state.mode === "mard" ? `MARD ${activeMardPalette().length}` : "cluster colors"}`, 40, Math.min(top + 20, PDF_HEIGHT - 46), 9, [95, 91, 82]));
-    commands.push(pdfText("Print at 100% scale. Use the tile headers to assemble large patterns.", 40, PDF_HEIGHT - 25, 8, [130, 124, 113]), "Q");
-    return commands.join("\n");
-  }
+  function buildPdfSinglePage() {
+    const margin = 28;
+    const header = 42;
+    const footer = 20;
+    // Keep a usable vector cell size. The page is allowed to be larger than A4 so
+    // the complete pattern remains on one page instead of being split into tiles.
+    const cellSize = 10;
+    const gridWidth = state.width * cellSize;
+    const gridHeight = state.height * cellSize;
+    const pageWidth = Math.max(PDF_MIN_WIDTH, gridWidth + margin * 2);
+    const pageHeight = Math.max(PDF_MIN_HEIGHT, gridHeight + header + footer);
+    const originX = (pageWidth - gridWidth) / 2;
+    const originTop = header;
+    const paletteName = state.mode === "mard" ? `MARD ${activeMardPalette().length}` : "cluster colors";
+    const commands = ["q", pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight), pdfText(`Palette: ${paletteName}   Cells: ${state.pattern.length.toLocaleString()}   Single-page vector PDF`, margin, 35, 7, [95, 91, 82], pageHeight)];
 
-  function buildPdfGridPage(startX, startY, columns, rows) {
-    const marginX = 30;
-    const topReserved = 52;
-    const bottomReserved = 27;
-    const cellSize = Math.min((PDF_WIDTH - marginX * 2) / columns, (PDF_HEIGHT - topReserved - bottomReserved) / rows);
-    const gridWidth = cellSize * columns;
-    const gridHeight = cellSize * rows;
-    const originX = (PDF_WIDTH - gridWidth) / 2;
-    const originTop = topReserved + ((PDF_HEIGHT - topReserved - bottomReserved) - gridHeight) / 2;
-    const commands = ["q", pdfText(`Columns ${startX + 1}-${startX + columns}   Rows ${startY + 1}-${startY + rows}`, 30, 28, 9), pdfText("Every cell shows its color code", 390, 28, 8, [95, 91, 82])];
-
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
-        const color = state.pattern[(startY + row) * state.width + startX + column];
+    for (let row = 0; row < state.height; row++) {
+      for (let column = 0; column < state.width; column++) {
+        const color = state.pattern[row * state.width + column];
         if (!color) continue;
-        commands.push(pdfFillRect(color.rgb, originX + column * cellSize, originTop + row * cellSize, cellSize, cellSize));
+        commands.push(pdfFillRect(color.rgb, originX + column * cellSize, originTop + row * cellSize, cellSize, cellSize, pageHeight));
       }
     }
 
     commands.push(`${pdfColor([48, 45, 39], "RG")} ${pdfNumber(Math.max(.25, Math.min(.7, cellSize / 15)))} w`);
-    for (let column = 0; column <= columns; column++) {
+    for (let column = 0; column <= state.width; column++) {
       const x = originX + column * cellSize;
-      commands.push(`${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - originTop)} m ${pdfNumber(x)} ${pdfNumber(PDF_HEIGHT - originTop + gridHeight)} l`);
+      commands.push(`${pdfNumber(x)} ${pdfNumber(pageHeight - originTop)} m ${pdfNumber(x)} ${pdfNumber(pageHeight - originTop - gridHeight)} l`);
     }
-    for (let row = 0; row <= rows; row++) {
+    for (let row = 0; row <= state.height; row++) {
       const top = originTop + row * cellSize;
-      const y = PDF_HEIGHT - top;
+      const y = pageHeight - top;
       commands.push(`${pdfNumber(originX)} ${pdfNumber(y)} m ${pdfNumber(originX + gridWidth)} ${pdfNumber(y)} l`);
     }
     commands.push("S");
 
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
-        const color = state.pattern[(startY + row) * state.width + startX + column];
+    for (let row = 0; row < state.height; row++) {
+      for (let column = 0; column < state.width; column++) {
+        const color = state.pattern[row * state.width + column];
         if (!color) continue;
         const label = String(color.id || "?").slice(0, 8);
         const size = Math.max(3.2, Math.min(8, cellSize * (label.length > 4 ? .28 : .36)));
         const x = originX + column * cellSize + cellSize / 2 - label.length * size * .27;
         const top = originTop + row * cellSize + cellSize / 2 + size * .34;
-        commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb)));
+        commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb), pageHeight));
       }
     }
-    commands.push(pdfText("Perler Pattern", 30, PDF_HEIGHT - 11, 7, [130, 124, 113]), "Q");
-    return commands.join("\n");
+    commands.push(pdfText("Perler Pattern  |  Print with fit-to-page if necessary", margin, pageHeight - 8, 7, [130, 124, 113], pageHeight), "Q");
+    return { content: commands.join("\n"), pageWidth, pageHeight };
   }
 
-  function buildPdfFile(pages) {
+  function buildPdfFile(pages, pageWidth, pageHeight) {
     const pageObjectNumbers = pages.map((_, index) => 4 + index * 2);
     const objects = [];
     objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
@@ -565,7 +673,7 @@
       const contentNumber = pageNumber + 1;
       const stream = `${content}\n`;
       const length = PDF_ENCODER.encode(stream).length;
-      objects[pageNumber] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_WIDTH} ${PDF_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentNumber} 0 R >>`;
+      objects[pageNumber] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfNumber(pageWidth)} ${pdfNumber(pageHeight)}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentNumber} 0 R >>`;
       objects[contentNumber] = `<< /Length ${length} >>\nstream\n${stream}endstream`;
     });
 
@@ -585,18 +693,14 @@
   function exportPdf() {
     if (!els.downloadPdf) return showToast("请先上传带有 PDF 导出按钮的新版 index.html");
     if (!state.pattern.length) return showToast("请先生成拼豆图解");
-    const cellsPerPage = Number(els.pdfCellsPerPage && els.pdfCellsPerPage.value) || 50;
     els.downloadPdf.disabled = true;
-    setStatus("正在生成矢量 PDF…");
+    setStatus("正在生成单页整图 PDF…");
     setTimeout(() => {
       try {
-        const pages = [buildPdfCoverPage(cellsPerPage)];
-        for (let startY = 0; startY < state.height; startY += cellsPerPage) {
-          for (let startX = 0; startX < state.width; startX += cellsPerPage) pages.push(buildPdfGridPage(startX, startY, Math.min(cellsPerPage, state.width - startX), Math.min(cellsPerPage, state.height - startY)));
-        }
-        saveBlob(`perler-pattern-${state.width}x${state.height}.pdf`, new Blob([buildPdfFile(pages)], { type: "application/pdf" }));
+        const page = buildPdfSinglePage();
+        saveBlob(`perler-pattern-${state.width}x${state.height}.pdf`, new Blob([buildPdfFile([page.content], page.pageWidth, page.pageHeight)], { type: "application/pdf" }));
         setStatus("PDF 已生成", true);
-        showToast(`已导出 ${pages.length} 页矢量 PDF，每格包含色号`);
+        showToast("已导出单页整图矢量 PDF，每格包含色号");
       } catch (error) {
         setStatus("PDF 导出失败");
         showToast(`PDF 导出失败：${error.message || "浏览器内存不足"}`);
@@ -621,10 +725,11 @@
   ["dragleave", "drop"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.remove("dragging"); }));
   els.dropZone.addEventListener("drop", (event) => loadImage(event.dataTransfer.files[0]));
   els.colorCount.addEventListener("input", () => { els.colorCountValue.textContent = els.colorCount.value; markPatternStale("颜色数已改变，请重新生成图解"); });
-  els.paletteStyle.addEventListener("change", () => markPatternStale("颜色风格已改变，请重新生成图解"));
+  if (els.paletteStyle) els.paletteStyle.addEventListener("change", () => markPatternStale("颜色参数已改变，请重新生成图解"));
   [els.denoise, els.dither, els.majorityFilter].forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
-  els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials); els.zoom.addEventListener("input", applyZoom);
+  els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
+  els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });
   els.downloadPng.addEventListener("click", () => { if (state.pattern.length) els.canvas.toBlob((blob) => saveBlob(`perler-pattern-${state.width}x${state.height}.png`, blob), "image/png"); });
   if (els.downloadPdf) els.downloadPdf.addEventListener("click", exportPdf);
   els.downloadJson.addEventListener("click", downloadJson);
@@ -632,4 +737,14 @@
   els.density.addEventListener("input", () => { if (state.pattern.length) renderMaterials(); });
   els.copyMaterials.addEventListener("click", async () => { try { await navigator.clipboard.writeText(materialText()); showToast("材料清单已复制"); } catch { showToast("当前浏览器不允许复制，请使用导出数据"); } });
   $$('input[name="colorMode"]').forEach((input) => input.addEventListener("change", () => { $$(".radio-card").forEach((card) => card.classList.toggle("selected", card.querySelector("input").checked)); markPatternStale("颜色模式已改变，请重新生成图解"); }));
+  if (els.toggleControls) els.toggleControls.addEventListener("click", () => {
+    const hideControls = !els.appShell.classList.contains("hide-controls");
+    setSidebarsHidden(hideControls, els.appShell.classList.contains("hide-results"));
+  });
+  if (els.toggleResults) els.toggleResults.addEventListener("click", () => {
+    const hideResults = !els.appShell.classList.contains("hide-results");
+    setSidebarsHidden(els.appShell.classList.contains("hide-controls"), hideResults);
+  });
+  if (els.fitPattern) els.fitPattern.addEventListener("click", () => { fitPatternToViewport(); showToast("图纸已适应当前窗口"); });
+  if (window.addEventListener) window.addEventListener("resize", () => { if (state.autoFit) scheduleFitPattern(); });
 })();

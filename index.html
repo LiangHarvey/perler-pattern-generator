@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.2.1</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.3.0</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -50,14 +50,14 @@
         </section>
 
         <section class="step-card">
-          <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">LAB 聚类 + MARD 色卡映射</span></div>
-          <div class="field-row">
-            <label class="field"><span>颜色数 <small>3–12</small></span><div class="range-line"><input id="colorCount" type="range" min="3" max="12" value="8" /><output id="colorCountValue">8</output></div></label>
+        <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">LAB 聚类 + MARD 280 全色卡</span></div>
+        <div class="field-row">
+            <label class="field"><span>颜色数 <small>6–48</small></span><div class="range-line"><input id="colorCount" type="range" min="6" max="48" value="24" /><output id="colorCountValue">24</output></div></label>
           </div>
           <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
           <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 280 色</strong><small>编辑/购买用 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
-          <label class="select-field"><span>颜色风格</span><select id="paletteStyle"><option value="all">全部 MARD 280 色（映射最强）</option><option value="warm">秋冬暖调（推荐子集）</option><option value="natural">自然大地（推荐子集）</option><option value="fresh">清新明亮（推荐子集）</option><option value="vivid">高饱和（推荐子集）</option></select></label>
+          <p class="hint palette-note">始终使用完整 MARD 280 色卡，提高细节和原图相似度。</p>
           <label class="palette-import"><span>色卡数据</span><span class="import-control"><input id="paletteInput" type="file" accept=".json,.csv,text/csv,application/json" />导入我的 MARD 280 色卡</span></label>
           <p id="paletteStatus" class="hint">内置公开参考版 MARD 280 色，可用 CSV/JSON 替换为你的实物色卡。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
@@ -70,15 +70,14 @@
             <label class="input-field"><span>网格宽（针数）</span><input id="gridWidth" type="number" min="8" max="240" value="120" /></label>
             <label class="input-field"><span>网格高（行数）</span><input id="gridHeight" type="number" min="8" max="240" value="140" /></label>
           </div>
-          <label class="check-row"><input id="dither" type="checkbox" checked /><span>Floyd-Steinberg 抖动 <em>（少色柔和过渡）</em></span></label>
+          <label class="check-row"><input id="dither" type="checkbox" checked /><span>细节抖动 <em>（改善渐变和照片相似度）</em></span></label>
           <label class="check-row"><input id="majorityFilter" type="checkbox" checked /><span>多数投票滤波 <em>（清除孤立杂点）</em></span></label>
           <label class="check-row"><input id="showCodes" type="checkbox" checked /><span>格子显示色号 <em>（导出 PDF 固定保留）</em></span></label>
           <p class="label-title">边缘处理</p>
           <div class="segmented"><label><input type="radio" name="edgeMode" value="auto" checked /><span>自动</span></label><label><input type="radio" name="edgeMode" value="sharp" /><span>锐利</span></label><label><input type="radio" name="edgeMode" value="smooth" /><span>平滑</span></label></div>
           <p class="hint">自动模式在保留轮廓和减少颜色跳变之间取平衡；锐利模式更适合人物和线稿。</p>
           <button id="generatePattern" class="button button-orange" type="button" disabled>生成拼豆图解</button>
-          <label class="select-field pdf-page-field"><span>PDF 每页格数</span><select id="pdfCellsPerPage"><option value="40">40 × 40（字更大）</option><option value="50" selected>50 × 50（推荐）</option><option value="60">60 × 60（页数更少）</option></select></label>
-          <div class="legend-note">符号：每色唯一符号，黑白打印可识别。每 10 针/10 行粗参考线。</div>
+          <div class="legend-note">每格保留 MARD 色号；PDF 为单页整图，页面尺寸按图纸自动生成。每 10 针/10 行粗参考线。</div>
         </section>
 
         <section class="step-card material-input-card">
@@ -91,8 +90,8 @@
 
       <section class="workspace">
         <div class="workspace-toolbar">
-          <div><span class="live-dot"></span><span id="statusText">等待上传图片</span></div>
-          <div class="zoom-control"><span>缩放</span><input id="zoom" type="range" min="40" max="140" value="90" /><output id="zoomValue">90%</output></div>
+          <div class="workspace-status"><span><span class="live-dot"></span><span id="statusText">等待上传图片</span></span><span class="toolbar-actions"><button id="toggleControls" class="toolbar-button" type="button" aria-expanded="true">隐藏设置</button><button id="toggleResults" class="toolbar-button" type="button" aria-expanded="true">隐藏结果</button><button id="fitPattern" class="toolbar-button" type="button">适应窗口</button></span></div>
+          <div class="zoom-control"><span>缩放</span><input id="zoom" type="range" min="10" max="150" value="90" /><output id="zoomValue">90%</output></div>
         </div>
         <div id="canvasViewport" class="canvas-viewport">
           <div id="emptyState" class="empty-state"><div class="empty-mark">✦</div><h2>你的拼豆图纸会出现在这里</h2><p>先从左侧上传一张图片</p></div>
