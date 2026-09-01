@@ -5,10 +5,10 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"),
+    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
-    showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"),
+    showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
     appShell: $(".app-shell"), controlsPanel: $(".controls-panel"), resultsPanel: $(".results-panel"), toggleControls: $("#toggleControls"), toggleResults: $("#toggleResults"), fitPattern: $("#fitPattern"), loadingOverlay: $("#loadingOverlay"), loadingTitle: $("#loadingTitle"), loadingDetail: $("#loadingDetail")
   };
 
@@ -346,9 +346,16 @@
       els.zoomValue.value = `${percent}%`;
       els.zoomValue.textContent = `${percent}%`;
     }
-    els.canvas.style.transform = `scale(${scale})`;
-    els.canvas.style.transformOrigin = "center center";
-    els.canvas.style.margin = `${Math.max(0, (scale - 1) * 100)}px`;
+    // Resize the canvas in layout space instead of using transform: scale().
+    // Transforms do not enlarge the scrollable area, which made a zoomed chart
+    // appear to get stuck at one edge on some touch browsers.
+    if (els.canvas.width && els.canvas.height) {
+      els.canvas.style.transform = "none";
+      els.canvas.style.transformOrigin = "initial";
+      els.canvas.style.width = `${Math.max(1, Math.round(els.canvas.width * scale))}px`;
+      els.canvas.style.height = `${Math.max(1, Math.round(els.canvas.height * scale))}px`;
+      els.canvas.style.margin = "0 auto";
+    }
   }
 
   function fitPatternToViewport() {
@@ -396,9 +403,13 @@
         if (els.emptyState) els.emptyState.classList.remove("hidden");
         if (els.canvasMeta) els.canvasMeta.textContent = "—";
         if (els.extractedColors) els.extractedColors.innerHTML = "";
+        if (els.extractedResultDetails) els.extractedResultDetails.open = true;
+        if (els.extractedResultSummary) els.extractedResultSummary.textContent = "上传图片后生成";
         if (els.legend) els.legend.innerHTML = '<div class="empty-result">生成图解后显示颜色图例</div>';
         if (els.materialsBody) els.materialsBody.innerHTML = '<tr><td colspan="4" class="empty-result">暂无数据</td></tr>';
         if (els.totalStitches) els.totalStitches.textContent = "—";
+        if (els.generatedResultDetails) els.generatedResultDetails.open = true;
+        if (els.generatedResultSummary) els.generatedResultSummary.textContent = "生成图解后显示";
         setSidebarsHidden(false, false, false);
         populatePrecisionOptions();
         setStatus("图片已载入，等待生成", true);
@@ -601,6 +612,7 @@
         const { mode, style, clusters, selectedColors } = analyzePixels(pixels, colorCount);
         state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedColorCount = colorCount; state.width = width; state.height = height; state.sourcePixels = pixels;
         renderExtractedColors();
+        if (els.extractedResultDetails) els.extractedResultDetails.open = false;
         setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
         showToast("主色提取完成，可以生成图解");
       } catch (error) {
@@ -628,6 +640,8 @@
         if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
         state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, requestedColorCount: Number(els.colorCount.value), sourcePixels: pixels };
         renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
+        if (els.extractedResultDetails) els.extractedResultDetails.open = false;
+        if (els.generatedResultDetails) els.generatedResultDetails.open = false;
         setDisabled(els.downloadPng, false); setDisabled(els.downloadPdf, false); setDisabled(els.downloadJson, false); setDisabled(els.copyMaterials, false);
         // In the vertical layout the upload/settings and legend targets remain
         // available above the chart after generation.
@@ -645,19 +659,71 @@
 
   function renderExtractedColors() {
     if (els.extractedColors) els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
+    if (els.extractedResultSummary) els.extractedResultSummary.textContent = state.selectedColors.length ? `${state.selectedColors.length} 色 · 点击展开查看` : "尚未提取";
     if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（卡组限定）` : "原图真实色";
+  }
+
+  function patternCanvasLayout(cellSize) {
+    const { width, height } = state;
+    const axisFontSize = Math.max(6, Math.min(12, Math.round(cellSize * .52)));
+    const outerBorder = Math.max(8, Math.round(cellSize * .65));
+    const leftAxis = Math.max(30, Math.ceil(axisFontSize * 3.8));
+    const topAxis = Math.max(26, Math.ceil(axisFontSize * 1.9));
+    const originX = outerBorder + leftAxis;
+    const originY = outerBorder + topAxis;
+    return {
+      axisFontSize,
+      outerBorder,
+      leftAxis,
+      topAxis,
+      originX,
+      originY,
+      gridWidth: width * cellSize,
+      gridHeight: height * cellSize,
+      canvasWidth: originX + width * cellSize + outerBorder,
+      canvasHeight: originY + height * cellSize + outerBorder
+    };
   }
 
   function drawPatternToCanvas(targetCanvas, cellSize, forceCodes = false) {
     const { width, height, pattern } = state;
-    targetCanvas.width = width * cellSize;
-    targetCanvas.height = height * cellSize;
+    const layout = patternCanvasLayout(cellSize);
+    targetCanvas.width = layout.canvasWidth;
+    targetCanvas.height = layout.canvasHeight;
     const context = targetCanvas.getContext("2d");
     if (!context) throw new Error("浏览器不支持绘制图纸");
     context.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+
+    // Leave a clear white margin around the rulers and the pattern itself.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
+    context.strokeStyle = "#d8d2c8";
+    context.lineWidth = 1;
+    context.strokeRect(layout.outerBorder + .5, layout.outerBorder + .5, layout.canvasWidth - layout.outerBorder * 2 - 1, layout.canvasHeight - layout.outerBorder * 2 - 1);
+
+    // Every column and row receives a 1-based coordinate, matching the grid.
+    context.fillStyle = "#5e594f";
+    context.font = `600 ${layout.axisFontSize}px Arial, "Microsoft YaHei", sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    for (let column = 0; column < width; column++) {
+      context.fillText(String(column + 1), layout.originX + column * cellSize + cellSize / 2, layout.outerBorder + layout.topAxis / 2);
+    }
+    for (let row = 0; row < height; row++) {
+      context.fillText(String(row + 1), layout.outerBorder + layout.leftAxis / 2, layout.originY + row * cellSize + cellSize / 2);
+    }
+    context.strokeStyle = "#cfc8bd";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(layout.originX, layout.outerBorder);
+    context.lineTo(layout.originX, layout.canvasHeight - layout.outerBorder);
+    context.moveTo(layout.outerBorder, layout.originY);
+    context.lineTo(layout.canvasWidth - layout.outerBorder, layout.originY);
+    context.stroke();
+
     const symbolMap = new Map(state.selectedColors.map((color, index) => [color.id, SYMBOLS[index % SYMBOLS.length]]));
     pattern.forEach((color, index) => {
-      const x = index % width, y = Math.floor(index / width), px = x * cellSize, py = y * cellSize;
+      const x = index % width, y = Math.floor(index / width), px = layout.originX + x * cellSize, py = layout.originY + y * cellSize;
       context.fillStyle = rgbCss(color.rgb); context.fillRect(px, py, cellSize, cellSize);
       context.strokeStyle = (x % 10 === 0 || y % 10 === 0) ? "rgba(37,34,26,.38)" : "rgba(37,34,26,.15)"; context.lineWidth = (x % 10 === 0 || y % 10 === 0) ? 1.2 : .55; context.strokeRect(px, py, cellSize, cellSize);
       if (cellSize >= 6) {
@@ -675,6 +741,10 @@
         context.fillText(label, px + cellSize / 2, py + cellSize / 2 + .5);
       }
     });
+    context.strokeStyle = "rgba(37,34,26,.55)";
+    context.lineWidth = 1.4;
+    context.strokeRect(layout.originX + .5, layout.originY + .5, layout.gridWidth - 1, layout.gridHeight - 1);
+    return layout;
   }
 
   function renderPattern() {
@@ -685,13 +755,14 @@
     // raise the zoom slider to inspect individual rows.
     const cellSize = Math.max(14, Math.min(24, Math.floor(4200 / Math.max(width, height))));
     drawPatternToCanvas(els.canvas, cellSize, false);
-    applyZoom(); if (els.emptyState) els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); if (els.canvasMeta) els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色`;
+    applyZoom(); if (els.emptyState) els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); if (els.canvasMeta) els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色 · 含坐标`;
   }
 
   function renderLegend() {
     if (!els.legend) return;
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
     els.legend.innerHTML = state.selectedColors.map((color) => `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small></div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`).join("");
+    if (els.generatedResultSummary) els.generatedResultSummary.textContent = state.pattern.length ? `${state.width} × ${state.height} 格 · 点击展开查看` : "生成图解后显示";
   }
 
   function renderMaterials() {
@@ -757,6 +828,11 @@
   function pdfEscape(value) { return String(value).replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, (character) => `\\${character}`); }
   function pdfText(text, x, top, size, rgb = [39, 37, 31], pageHeight = PDF_MIN_HEIGHT) { return `${pdfColor(rgb)} BT /F1 ${pdfNumber(size)} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(pageHeight - top)} Tm (${pdfEscape(text)}) Tj ET`; }
   function pdfFillRect(rgb, x, top, width, height, pageHeight = PDF_MIN_HEIGHT) { return `${pdfColor(rgb)} ${pdfNumber(x)} ${pdfNumber(pageHeight - top - height)} ${pdfNumber(width)} ${pdfNumber(height)} re f`; }
+  function pdfStrokeRect(rgb, x, top, width, height, lineWidth = 1, pageHeight = PDF_MIN_HEIGHT) { return `${pdfColor(rgb, "RG")} ${pdfNumber(lineWidth)} w ${pdfNumber(x)} ${pdfNumber(pageHeight - top - height)} ${pdfNumber(width)} ${pdfNumber(height)} re S`; }
+  function pdfTextCentered(text, centerX, baselineTop, size, rgb = [39, 37, 31], pageHeight = PDF_MIN_HEIGHT) {
+    const label = String(text);
+    return pdfText(label, centerX - label.length * size * .25, baselineTop, size, rgb, pageHeight);
+  }
 
   function buildPdfSinglePage() {
     const margin = 28;
@@ -765,14 +841,33 @@
     // Keep a usable vector cell size. The page is allowed to be larger than A4 so
     // the complete pattern remains on one page instead of being split into tiles.
     const cellSize = 18;
-    const gridWidth = state.width * cellSize;
-    const gridHeight = state.height * cellSize;
-    const pageWidth = Math.max(PDF_MIN_WIDTH, gridWidth + margin * 2);
-    const pageHeight = Math.max(PDF_MIN_HEIGHT, gridHeight + header + footer);
-    const originX = (pageWidth - gridWidth) / 2;
-    const originTop = header;
+    const layout = patternCanvasLayout(cellSize);
+    const pageWidth = Math.max(PDF_MIN_WIDTH, layout.canvasWidth + margin * 2);
+    const pageHeight = Math.max(PDF_MIN_HEIGHT, layout.canvasHeight + header + footer);
+    const boardLeft = (pageWidth - layout.canvasWidth) / 2;
+    const boardTop = header;
+    const originX = boardLeft + layout.originX;
+    const originTop = boardTop + layout.originY;
+    const gridWidth = layout.gridWidth;
+    const gridHeight = layout.gridHeight;
     const paletteName = state.mode === "mard" ? `MARD 280 standard / ${state.requestedColorCount || state.selectedColors.length} tier` : "cluster colors";
-    const commands = ["q", pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight), pdfText(`Palette: ${paletteName}   Cells: ${state.pattern.length.toLocaleString()}   Single-page vector PDF`, margin, 35, 7, [95, 91, 82], pageHeight)];
+    const commands = [
+      "q",
+      pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight),
+      pdfText(`Palette: ${paletteName}   Cells: ${state.pattern.length.toLocaleString()}   Single-page vector PDF`, margin, 35, 7, [95, 91, 82], pageHeight),
+      pdfFillRect([255, 255, 255], boardLeft, boardTop, layout.canvasWidth, layout.canvasHeight, pageHeight),
+      pdfStrokeRect([216, 210, 200], boardLeft, boardTop, layout.canvasWidth, layout.canvasHeight, .8, pageHeight)
+    ];
+
+    const axisTextSize = layout.axisFontSize;
+    const axisBaseline = boardTop + layout.outerBorder + layout.topAxis / 2 + axisTextSize * .34;
+    for (let column = 0; column < state.width; column++) {
+      commands.push(pdfTextCentered(String(column + 1), originX + column * cellSize + cellSize / 2, axisBaseline, axisTextSize, [94, 89, 79], pageHeight));
+    }
+    for (let row = 0; row < state.height; row++) {
+      commands.push(pdfTextCentered(String(row + 1), boardLeft + layout.outerBorder + layout.leftAxis / 2, originTop + row * cellSize + cellSize / 2 + axisTextSize * .34, axisTextSize, [94, 89, 79], pageHeight));
+    }
+    commands.push(pdfStrokeRect([207, 200, 189], boardLeft + layout.outerBorder, boardTop + layout.outerBorder, layout.leftAxis + gridWidth, layout.topAxis + gridHeight, .55, pageHeight));
 
     for (let row = 0; row < state.height; row++) {
       for (let column = 0; column < state.width; column++) {
@@ -793,6 +888,7 @@
       commands.push(`${pdfNumber(originX)} ${pdfNumber(y)} m ${pdfNumber(originX + gridWidth)} ${pdfNumber(y)} l`);
     }
     commands.push("S");
+    commands.push(pdfStrokeRect([48, 45, 39], originX, originTop, gridWidth, gridHeight, .9, pageHeight));
 
     for (let row = 0; row < state.height; row++) {
       for (let column = 0; column < state.width; column++) {
