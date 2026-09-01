@@ -6,11 +6,11 @@
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
     denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"),
-    paletteInput: $("#paletteInput"), paletteStatus: $("#paletteStatus"),
+    paletteInput: $("#paletteInput"), paletteStatus: $("#paletteStatus"), mardReferenceInput: $("#mardReferenceInput"), mardReferenceStatus: $("#mardReferenceStatus"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
-    showCodes: $("#showCodes"), pdfCellsPerPage: $("#pdfCellsPerPage"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"),
-    appShell: $(".app-shell"), controlsPanel: $(".controls-panel"), resultsPanel: $(".results-panel"), toggleControls: $("#toggleControls"), toggleResults: $("#toggleResults"), fitPattern: $("#fitPattern")
+    showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"),
+    appShell: $(".app-shell"), controlsPanel: $(".controls-panel"), resultsPanel: $(".results-panel"), toggleControls: $("#toggleControls"), toggleResults: $("#toggleResults"), fitPattern: $("#fitPattern"), loadingOverlay: $("#loadingOverlay"), loadingTitle: $("#loadingTitle"), loadingDetail: $("#loadingDetail")
   };
 
   const DMC = [
@@ -32,6 +32,7 @@
   let customMardPalette = null;
   let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", stats: [], autoFit: false };
   let toastTimer;
+  let busy = false;
 
   // RGB -> LAB gives a perceptual distance that is more useful for color matching than raw RGB.
   function rgbToLab(rgb) {
@@ -59,10 +60,36 @@
   }
   function getEdgeMode() { return $("input[name='edgeMode']:checked").value; }
   function getPaletteStyle() { return els.paletteStyle ? els.paletteStyle.value : "all"; }
-  function showToast(message) { clearTimeout(toastTimer); els.toast.textContent = message; els.toast.classList.add("show"); toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2600); }
-  function setStatus(message, ready = false) { els.statusText.textContent = message; els.liveDot.classList.toggle("ready", ready); }
+  function showToast(message) {
+    if (!els.toast) return;
+    clearTimeout(toastTimer);
+    els.toast.textContent = message;
+    els.toast.classList.add("show");
+    toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2600);
+  }
+  function setStatus(message, ready = false) { if (els.statusText) els.statusText.textContent = message; if (els.liveDot) els.liveDot.classList.toggle("ready", ready); }
   function setDisabled(element, disabled) { if (element) element.disabled = disabled; }
   function validDimension(input, fallback) { const n = Number(input.value); return Number.isFinite(n) ? Math.max(8, Math.min(240, Math.round(n))) : fallback; }
+
+  function setLoading(visible, title = "正在处理", detail = "请稍候，处理完成前页面不会响应其他操作。") {
+    busy = visible;
+    if (els.loadingOverlay) {
+      els.loadingOverlay.classList.toggle("hidden", !visible);
+      els.loadingOverlay.setAttribute("aria-busy", String(visible));
+    }
+    if (els.loadingTitle) els.loadingTitle.textContent = title;
+    if (els.loadingDetail) els.loadingDetail.textContent = detail;
+    if (document.body) document.body.classList.toggle("is-busy", visible);
+  }
+
+  // The printed MARD chart uses A3/C13/H1 rather than zero-padded A03/C13/H01.
+  // Keep the internal palette data flexible, but show and export the chart's
+  // canonical code format.
+  function canonicalMardId(value) { return String(value).trim().replace(/^([A-Za-z]+)0+(\d+)$/, "$1$2"); }
+  function clonePaletteColor(color) {
+    const id = canonicalMardId(color.id);
+    return { ...color, id, name: /^MARD\s+/i.test(String(color.name || "")) ? `MARD ${id}` : (color.name || `MARD ${id}`), rgb: [...color.rgb], hex: hex(color.rgb) };
+  }
 
   function sourceContentBounds() {
     if (!sourceImage) return { x: 0, y: 0, width: 1, height: 1 };
@@ -126,7 +153,7 @@
 
   function activeMardPalette() {
     const palette = customMardPalette || window.MARD_PALETTE_280 || DMC;
-    return palette.length ? palette : DMC;
+    return palette.length ? palette.map(clonePaletteColor) : DMC;
   }
 
   function paletteForStyle() { return activeMardPalette(); }
@@ -266,6 +293,7 @@
   }
 
   function loadImage(file) {
+    if (busy) return;
     const isImage = file && ((file.type && file.type.startsWith("image/")) || /\.(png|jpe?g|webp|gif)$/i.test(file.name || ""));
     if (!isImage) { showToast("请选择 JPG、PNG 或 WEBP 图片"); return; }
     sourceFile = file;
@@ -385,7 +413,7 @@
   }
 
   async function importPaletteFile(file) {
-    if (!file) return;
+    if (!file || busy) return;
     try {
       const palette = parsePaletteText(await file.text(), file.name);
       if (palette.length < 3) throw new Error("至少需要 3 个有效色号和颜色值");
@@ -399,6 +427,122 @@
       showToast("色卡文件无法识别，请检查 CSV/JSON 格式");
     } finally {
       if (els.paletteInput) els.paletteInput.value = "";
+    }
+  }
+
+  function fileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("文件读取失败"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function imageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("色卡图片无法读取"));
+      image.src = dataUrl;
+    });
+  }
+
+  function calibrateMardPalette(image) {
+    const sourcePalette = window.MARD_PALETTE_280 && window.MARD_PALETTE_280.length ? window.MARD_PALETTE_280 : DMC;
+    const basePalette = sourcePalette.map(clonePaletteColor);
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (!sourceWidth || !sourceHeight) throw new Error("图片尺寸无法读取");
+
+    // Downsample only for calibration. The swatches are much larger than this
+    // sample step, while the work remains light enough for a phone browser.
+    const sampleWidth = Math.min(620, sourceWidth);
+    const sampleHeight = Math.max(1, Math.round(sourceHeight * sampleWidth / sourceWidth));
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = sampleWidth;
+    sampleCanvas.height = sampleHeight;
+    const context = sampleCanvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("浏览器不支持读取色卡图片像素");
+    context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+    const data = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    const buckets = basePalette.map(() => ({ sum: [0, 0, 0], weight: 0, samples: 0 }));
+    const stride = sampleWidth > 500 ? 4 : 3;
+    const radius = 2;
+
+    function patchAt(centerX, centerY) {
+      let r = 0, g = 0, b = 0, luminanceSum = 0, luminanceSquareSum = 0, count = 0;
+      for (let y = Math.max(0, centerY - radius); y <= Math.min(sampleHeight - 1, centerY + radius); y++) {
+        for (let x = Math.max(0, centerX - radius); x <= Math.min(sampleWidth - 1, centerX + radius); x++) {
+          const index = (y * sampleWidth + x) * 4;
+          const red = data[index], green = data[index + 1], blue = data[index + 2];
+          const luminance = red * .299 + green * .587 + blue * .114;
+          r += red; g += green; b += blue;
+          luminanceSum += luminance; luminanceSquareSum += luminance * luminance;
+          count++;
+        }
+      }
+      const rgb = [r / count, g / count, b / count];
+      const luminance = luminanceSum / count;
+      return { rgb, luminance, chroma: Math.max(...rgb) - Math.min(...rgb), variance: Math.max(0, luminanceSquareSum / count - luminance * luminance) };
+    }
+
+    for (let y = radius; y < sampleHeight - radius; y += stride) {
+      for (let x = radius; x < sampleWidth - radius; x += stride) {
+        const patch = patchAt(x, y);
+        // The chart background and its gray frame occupy a lot of pixels. They
+        // are not bead swatches, so exclude nearly neutral light regions. A
+        // local-variance gate also removes most printed code/hexagon edges.
+        if ((patch.luminance > 242 && patch.chroma < 18) || (patch.luminance > 215 && patch.chroma < 7) || patch.variance > 900) continue;
+        let nearestIndex = -1;
+        let nearestDistance = Infinity;
+        basePalette.forEach((color, index) => {
+          const distance = (patch.rgb[0] - color.rgb[0]) ** 2 + (patch.rgb[1] - color.rgb[1]) ** 2 + (patch.rgb[2] - color.rgb[2]) ** 2;
+          if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = index; }
+        });
+        if (nearestIndex < 0 || nearestDistance > 155 ** 2) continue;
+        const weight = Math.max(.15, 1 - patch.variance / 900);
+        const bucket = buckets[nearestIndex];
+        bucket.sum = bucket.sum.map((value, channel) => value + patch.rgb[channel] * weight);
+        bucket.weight += weight;
+        bucket.samples++;
+      }
+    }
+
+    let calibrated = 0;
+    const palette = basePalette.map((color, index) => {
+      const bucket = buckets[index];
+      if (bucket.samples < 2 || bucket.weight < 1) return color;
+      const sampled = bucket.sum.map((value) => clamp(value / bucket.weight));
+      // Keep a small amount of the bundled reference so a JPEG highlight or a
+      // single imperfect swatch cannot move a color too far.
+      const rgb = sampled.map((value, channel) => Math.round(value * .82 + color.rgb[channel] * .18));
+      calibrated++;
+      return { ...color, rgb, hex: hex(rgb) };
+    });
+    return { palette, calibrated };
+  }
+
+  async function importMardReference(file) {
+    if (!file || busy) return;
+    const isImage = (file.type && file.type.startsWith("image/")) || /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
+    if (!isImage) { showToast("请选择 MARD 色卡 JPG、PNG 或 WEBP 图片"); return; }
+    setLoading(true, "正在校准 MARD 色卡", "正在读取色卡图片并建立颜色刻度，请稍候…");
+    try {
+      const image = await imageFromDataUrl(await fileAsDataUrl(file));
+      const result = calibrateMardPalette(image);
+      if (result.calibrated < 3) throw new Error("没有识别到足够的色卡色块，请上传清晰、完整的色卡图片");
+      customMardPalette = result.palette;
+      if (els.mardReferenceStatus) els.mardReferenceStatus.textContent = `已用色卡图片校准 ${result.calibrated} 个 MARD 色号；色号沿用图片对应的 MARD 编码，请重新提取主色。`;
+      markPatternStale("MARD 色卡已校准，请重新生成图解");
+      if (sourceImage) setStatus("MARD 色卡已校准，请重新提取主色", true);
+      showToast(`MARD 色卡校准完成：${result.calibrated} 个颜色`);
+    } catch (error) {
+      if (els.mardReferenceStatus) els.mardReferenceStatus.textContent = `色卡校准失败：${error.message || "图片格式无法识别"}`;
+      showToast(`MARD 色卡校准失败：${error.message || "请更换清晰色卡图片"}`);
+    } finally {
+      if (els.mardReferenceInput) els.mardReferenceInput.value = "";
+      setLoading(false);
     }
   }
 
@@ -464,9 +608,19 @@
 
   function nearestColor(rgb, colors) { let nearest = colors[0], distance = Infinity; for (const color of colors) { const d = colorDistance(rgb, color.rgb || color); if (d < distance) { distance = d; nearest = color; } } return nearest; }
 
-  function buildSelectedColors(clusters, mode, style, desiredCount) {
+  function buildSelectedColors(clusters, mode, style, desiredCount, pixels = []) {
     if (mode === "original") return clusters.slice(0, desiredCount).map((cluster, index) => ({ id: `C${String(index + 1).padStart(2, "0")}`, name: `真实色${index + 1}`, rgb: cluster.rgb, original: true }));
     const palette = paletteForStyle(style);
+    // Rank the complete MARD palette against the actual grid pixels first. This
+    // preserves frequent highlight/shadow colors better than choosing a single
+    // palette color from each k-means center, which can make a photo look flat.
+    if (pixels.length) {
+      const ranked = paletteFrequencyOrder(pixels, palette);
+      const chosen = ranked.filter((item) => item.count > 0).slice(0, desiredCount).map((item) => item.color);
+      if (chosen.length >= Math.min(desiredCount, palette.length)) return chosen;
+      ranked.forEach(({ color }) => { if (chosen.length < desiredCount && !chosen.some((selected) => selected.id === color.id)) chosen.push(color); });
+      if (chosen.length) return chosen;
+    }
     const chosen = [];
     for (const cluster of clusters) {
       const sorted = [...palette].sort((a, b) => colorDistance(cluster.rgb, a.rgb) - colorDistance(cluster.rgb, b.rgb));
@@ -514,91 +668,183 @@
     return result;
   }
 
+  function rgbDistanceSquared(a, b) { return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2; }
+  function paletteFrequencyOrder(pixels, palette) {
+    const counts = new Array(palette.length).fill(0);
+    const stride = Math.max(1, Math.ceil(pixels.length / 30000));
+    for (let index = 0; index < pixels.length; index += stride) {
+      const pixel = pixels[index];
+      let nearest = 0, distance = Infinity;
+      for (let colorIndex = 0; colorIndex < palette.length; colorIndex++) {
+        const nextDistance = rgbDistanceSquared(pixel, palette[colorIndex].rgb);
+        if (nextDistance < distance) { distance = nextDistance; nearest = colorIndex; }
+      }
+      counts[nearest]++;
+    }
+    return palette.map((color, index) => ({ color, count: counts[index] })).sort((a, b) => b.count - a.count);
+  }
+
   function extract() {
+    if (busy) return;
     if (!sourceImage) return showToast("请先上传图片");
     const width = validDimension(els.gridWidth, 120), height = validDimension(els.gridHeight, 140), colorCount = Number(els.colorCount.value);
     els.gridWidth.value = width; els.gridHeight.value = height;
+    setLoading(true, "正在提取主色", "正在分析图像并匹配 MARD 色卡，请稍候…");
     setStatus("正在提取颜色…");
     requestAnimationFrame(() => {
-      const data = drawSourceToGrid(width, height);
-      const pixels = [];
-      const radius = denoiseRadius(width, height);
-      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
-      const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), colorCount);
-      const mode = getMode(), style = getPaletteStyle();
-      state.clusters = clusters; state.selectedColors = buildSelectedColors(clusters, mode, style, colorCount); state.mode = mode; state.paletteStyle = style; state.width = width; state.height = height; state.sourcePixels = pixels;
-      renderExtractedColors();
-      setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
-      showToast("主色提取完成，可以生成图解");
+      try {
+        const data = drawSourceToGrid(width, height);
+        const pixels = [];
+        const radius = denoiseRadius(width, height);
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
+        const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), colorCount);
+        const mode = getMode(), style = getPaletteStyle();
+        state.clusters = clusters; state.selectedColors = buildSelectedColors(clusters, mode, style, colorCount, pixels); state.mode = mode; state.paletteStyle = style; state.width = width; state.height = height; state.sourcePixels = pixels;
+        renderExtractedColors();
+        setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
+        showToast("主色提取完成，可以生成图解");
+      } catch (error) {
+        setStatus("主色提取失败");
+        showToast(`主色提取失败：${error.message || "浏览器内存不足"}`);
+      } finally {
+        setLoading(false);
+      }
     });
   }
 
   function generate() {
+    if (busy) return;
     if (!sourceImage) return showToast("请先上传图片");
     const width = validDimension(els.gridWidth, 120), height = validDimension(els.gridHeight, 140);
+    setLoading(true, "正在生成拼豆图解", "正在量化每个网格并写入 MARD 色号，请稍候…");
     setStatus("正在生成图解…");
     requestAnimationFrame(() => {
-      const data = drawSourceToGrid(width, height), pixels = [];
-      const radius = denoiseRadius(width, height);
-      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
-      const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), Number(els.colorCount.value));
-      const mode = getMode(), style = getPaletteStyle(), selectedColors = buildSelectedColors(clusters, mode, style, Number(els.colorCount.value));
-      let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
-      if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
-      state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, sourcePixels: pixels };
-      renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
-      setDisabled(els.downloadPng, false); setDisabled(els.downloadPdf, false); setDisabled(els.downloadJson, false); setDisabled(els.copyMaterials, false);
-      setSidebarsHidden(true, true, false);
-      setStatus("图解已生成，侧栏已隐藏", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
-      scheduleFitPattern();
+      try {
+        const data = drawSourceToGrid(width, height), pixels = [];
+        const radius = denoiseRadius(width, height);
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
+        const clusters = kmeans(pixels.filter((_, i) => i % Math.max(1, Math.floor(pixels.length / 6000)) === 0), Number(els.colorCount.value));
+        const mode = getMode(), style = getPaletteStyle(), selectedColors = buildSelectedColors(clusters, mode, style, Number(els.colorCount.value), pixels);
+        let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
+        if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
+        state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, sourcePixels: pixels };
+        renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
+        setDisabled(els.downloadPng, false); setDisabled(els.downloadPdf, false); setDisabled(els.downloadJson, false); setDisabled(els.copyMaterials, false);
+        setSidebarsHidden(true, true, false);
+        setStatus("图解已生成，侧栏已隐藏", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
+        scheduleFitPattern();
+      } catch (error) {
+        setStatus("图解生成失败");
+        showToast(`图解生成失败：${error.message || "浏览器内存不足"}`);
+      } finally {
+        setLoading(false);
+      }
     });
   }
 
   function renderExtractedColors() {
-    els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
+    if (els.extractedColors) els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
     if (els.modeBadge) els.modeBadge.textContent = state.mode === "mard" ? `MARD ${activeMardPalette().length} 色` : "原图真实色";
   }
 
-  function renderPattern() {
+  function drawPatternToCanvas(targetCanvas, cellSize, forceCodes = false) {
     const { width, height, pattern } = state;
-    const cellSize = Math.max(8, Math.min(18, Math.floor(1700 / Math.max(width, height))));
-    els.canvas.width = width * cellSize; els.canvas.height = height * cellSize;
-    const context = els.canvas.getContext("2d"); context.clearRect(0, 0, els.canvas.width, els.canvas.height);
+    targetCanvas.width = width * cellSize;
+    targetCanvas.height = height * cellSize;
+    const context = targetCanvas.getContext("2d");
+    if (!context) throw new Error("浏览器不支持绘制图纸");
+    context.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
     const symbolMap = new Map(state.selectedColors.map((color, index) => [color.id, SYMBOLS[index % SYMBOLS.length]]));
     pattern.forEach((color, index) => {
       const x = index % width, y = Math.floor(index / width), px = x * cellSize, py = y * cellSize;
       context.fillStyle = rgbCss(color.rgb); context.fillRect(px, py, cellSize, cellSize);
       context.strokeStyle = (x % 10 === 0 || y % 10 === 0) ? "rgba(37,34,26,.38)" : "rgba(37,34,26,.15)"; context.lineWidth = (x % 10 === 0 || y % 10 === 0) ? 1.2 : .55; context.strokeRect(px, py, cellSize, cellSize);
-      if (cellSize >= 8) {
-        const label = els.showCodes ? (els.showCodes.checked ? color.id : symbolMap.get(color.id) || "·") : symbolMap.get(color.id) || "·";
-        context.fillStyle = contrastText(color.rgb);
-        context.font = `700 ${Math.max(5, Math.min(9, Math.floor(cellSize * (label.length > 2 ? .34 : .55))))}px sans-serif`;
-        context.textAlign = "center"; context.textBaseline = "middle"; context.fillText(label, px + cellSize / 2, py + cellSize / 2 + .5);
+      if (cellSize >= 6) {
+        const label = forceCodes || !els.showCodes || els.showCodes.checked ? color.id : symbolMap.get(color.id) || "·";
+        const textColor = contrastText(color.rgb);
+        const fontSize = Math.max(6, Math.min(16, Math.round(cellSize * (label.length > 3 ? .35 : .5))));
+        context.font = `700 ${fontSize}px Arial, "Microsoft YaHei", sans-serif`;
+        context.textAlign = "center"; context.textBaseline = "middle";
+        // A small opposite-color halo keeps codes readable on both dark and
+        // light beads, including when a phone viewer scales the PNG down.
+        context.strokeStyle = textColor === "#fffdf7" ? "rgba(0,0,0,.62)" : "rgba(255,255,255,.78)";
+        context.lineWidth = Math.max(1, fontSize * .14);
+        context.strokeText(label, px + cellSize / 2, py + cellSize / 2 + .5);
+        context.fillStyle = textColor;
+        context.fillText(label, px + cellSize / 2, py + cellSize / 2 + .5);
       }
     });
-    applyZoom(); els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色`;
+  }
+
+  function renderPattern() {
+    const { width, height } = state;
+    if (!els.canvas) throw new Error("页面缺少图纸画布，请同时更新 index.html");
+    // A larger preview canvas gives the browser enough source pixels for clear
+    // labels. fitPatternToViewport may scale it down for the overview; users can
+    // raise the zoom slider to inspect individual rows.
+    const cellSize = Math.max(14, Math.min(24, Math.floor(4200 / Math.max(width, height))));
+    drawPatternToCanvas(els.canvas, cellSize, false);
+    applyZoom(); if (els.emptyState) els.emptyState.classList.add("hidden"); els.canvas.classList.remove("hidden"); if (els.canvasMeta) els.canvasMeta.textContent = `${width} × ${height} 格 · ${state.selectedColors.length} 色`;
   }
 
   function renderLegend() {
+    if (!els.legend) return;
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
     els.legend.innerHTML = state.selectedColors.map((color) => `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small></div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`).join("");
   }
 
   function renderMaterials() {
+    if (!els.materialsBody) return;
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
     const total = state.pattern.length;
     const density = Math.max(1, Number(els.density.value) || 20);
     const rows = state.selectedColors.filter((color) => counts.has(color.id)).map((color) => { const count = counts.get(color.id); const length = count * (10 / density) * 0.016; return { color, count, percent: total ? count / total * 100 : 0, length }; }).sort((a, b) => b.count - a.count);
     state.stats = rows;
     els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`).join("");
-    els.totalStitches.textContent = total.toLocaleString();
+    if (els.totalStitches) els.totalStitches.textContent = total.toLocaleString();
   }
 
   function materialText() { return ["拼豆材料清单", `图纸：${state.width} × ${state.height}`, "", "颜色\t数量\t占比\t估算线长", ...state.stats.map(({ color, count, percent, length }) => `${color.id} ${color.name}\t${count}\t${percent.toFixed(2)}%\t${length.toFixed(2)}m`), "", `总针数\t${state.pattern.length}`].join("\n"); }
 
-  function saveBlob(name, blob) { const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }
+  function saveBlob(name, blob) {
+    if (!blob) throw new Error("浏览器无法生成导出文件");
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
   function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD ${activeMardPalette().length}` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+
+  function exportPng() {
+    if (busy) return;
+    if (!state.pattern.length) return showToast("请先生成拼豆图解");
+    setLoading(true, "正在生成高清 PNG", "正在绘制大字号 MARD 色号，请稍候…");
+    requestAnimationFrame(() => {
+      try {
+        const exportCanvas = document.createElement("canvas");
+        // Keep the longest edge around 4,800px while retaining at least 16px per
+        // cell. This is readable after pinch-zoom without making phone memory use
+        // unnecessarily extreme.
+        const cellSize = Math.max(16, Math.min(26, Math.floor(4800 / Math.max(state.width, state.height))));
+        drawPatternToCanvas(exportCanvas, cellSize, true);
+        exportCanvas.toBlob((blob) => {
+          try {
+            if (!blob) throw new Error("浏览器无法生成 PNG");
+            saveBlob(`perler-pattern-${state.width}x${state.height}.png`, blob);
+            setStatus("PNG 已生成", true);
+            showToast("已导出高清 PNG，每格包含清晰色号");
+          } catch (error) {
+            setStatus("PNG 导出失败");
+            showToast(`PNG 导出失败：${error.message || "手机内存不足，请降低网格精度"}`);
+          } finally {
+            setLoading(false);
+          }
+        }, "image/png");
+      } catch (error) {
+        setStatus("PNG 导出失败");
+        showToast(`PNG 导出失败：${error.message || "手机内存不足，请降低网格精度"}`);
+        setLoading(false);
+      }
+    });
+  }
 
   // The PDF is assembled locally as vector drawing commands. It does not rasterize the
   // preview, so each cell stays sharp when printed and carries its color code.
@@ -617,7 +863,7 @@
     const footer = 20;
     // Keep a usable vector cell size. The page is allowed to be larger than A4 so
     // the complete pattern remains on one page instead of being split into tiles.
-    const cellSize = 10;
+    const cellSize = 18;
     const gridWidth = state.width * cellSize;
     const gridHeight = state.height * cellSize;
     const pageWidth = Math.max(PDF_MIN_WIDTH, gridWidth + margin * 2);
@@ -652,7 +898,7 @@
         const color = state.pattern[row * state.width + column];
         if (!color) continue;
         const label = String(color.id || "?").slice(0, 8);
-        const size = Math.max(3.2, Math.min(8, cellSize * (label.length > 4 ? .28 : .36)));
+        const size = Math.max(6, Math.min(12, cellSize * (label.length > 3 ? .35 : .48)));
         const x = originX + column * cellSize + cellSize / 2 - label.length * size * .27;
         const top = originTop + row * cellSize + cellSize / 2 + size * .34;
         commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb), pageHeight));
@@ -691,9 +937,11 @@
   }
 
   function exportPdf() {
+    if (busy) return;
     if (!els.downloadPdf) return showToast("请先上传带有 PDF 导出按钮的新版 index.html");
     if (!state.pattern.length) return showToast("请先生成拼豆图解");
     els.downloadPdf.disabled = true;
+    setLoading(true, "正在生成单页 PDF", "正在绘制矢量网格和每格色号，请稍候…");
     setStatus("正在生成单页整图 PDF…");
     setTimeout(() => {
       try {
@@ -706,6 +954,7 @@
         showToast(`PDF 导出失败：${error.message || "浏览器内存不足"}`);
       } finally {
         els.downloadPdf.disabled = false;
+        setLoading(false);
       }
     }, 30);
   }
@@ -721,6 +970,7 @@
     else showToast("请在 Bigjpg 放大并下载图片，再重新上传到本页");
   });
   if (els.paletteInput) els.paletteInput.addEventListener("change", (event) => importPaletteFile(event.target.files[0]));
+  if (els.mardReferenceInput) els.mardReferenceInput.addEventListener("change", (event) => importMardReference(event.target.files[0]));
   ["dragenter", "dragover"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.add("dragging"); }));
   ["dragleave", "drop"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.remove("dragging"); }));
   els.dropZone.addEventListener("drop", (event) => loadImage(event.dataTransfer.files[0]));
@@ -730,7 +980,7 @@
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
   els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });
-  els.downloadPng.addEventListener("click", () => { if (state.pattern.length) els.canvas.toBlob((blob) => saveBlob(`perler-pattern-${state.width}x${state.height}.png`, blob), "image/png"); });
+  els.downloadPng.addEventListener("click", exportPng);
   if (els.downloadPdf) els.downloadPdf.addEventListener("click", exportPdf);
   els.downloadJson.addEventListener("click", downloadJson);
   if (els.showCodes) els.showCodes.addEventListener("change", () => { if (state.pattern.length) renderPattern(); });

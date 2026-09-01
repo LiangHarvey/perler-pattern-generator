@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.3.0</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.4.0</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -58,6 +58,8 @@
           <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 280 色</strong><small>编辑/购买用 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
           <p class="hint palette-note">始终使用完整 MARD 280 色卡，提高细节和原图相似度。</p>
+          <label class="palette-import"><span>MARD 色卡刻度</span><span class="import-control"><input id="mardReferenceInput" type="file" accept="image/png,image/jpeg,image/webp" />上传色卡图片校准</span></label>
+          <p id="mardReferenceStatus" class="hint">可上传 MARD 基础色图片；校准后请重新提取主色。</p>
           <label class="palette-import"><span>色卡数据</span><span class="import-control"><input id="paletteInput" type="file" accept=".json,.csv,text/csv,application/json" />导入我的 MARD 280 色卡</span></label>
           <p id="paletteStatus" class="hint">内置公开参考版 MARD 280 色，可用 CSV/JSON 替换为你的实物色卡。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
@@ -71,13 +73,13 @@
             <label class="input-field"><span>网格高（行数）</span><input id="gridHeight" type="number" min="8" max="240" value="140" /></label>
           </div>
           <label class="check-row"><input id="dither" type="checkbox" checked /><span>细节抖动 <em>（改善渐变和照片相似度）</em></span></label>
-          <label class="check-row"><input id="majorityFilter" type="checkbox" checked /><span>多数投票滤波 <em>（清除孤立杂点）</em></span></label>
+          <label class="check-row"><input id="majorityFilter" type="checkbox" /><span>多数投票滤波 <em>（清除孤立杂点，可能牺牲细节）</em></span></label>
           <label class="check-row"><input id="showCodes" type="checkbox" checked /><span>格子显示色号 <em>（导出 PDF 固定保留）</em></span></label>
           <p class="label-title">边缘处理</p>
           <div class="segmented"><label><input type="radio" name="edgeMode" value="auto" checked /><span>自动</span></label><label><input type="radio" name="edgeMode" value="sharp" /><span>锐利</span></label><label><input type="radio" name="edgeMode" value="smooth" /><span>平滑</span></label></div>
           <p class="hint">自动模式在保留轮廓和减少颜色跳变之间取平衡；锐利模式更适合人物和线稿。</p>
           <button id="generatePattern" class="button button-orange" type="button" disabled>生成拼豆图解</button>
-          <div class="legend-note">每格保留 MARD 色号；PDF 为单页整图，页面尺寸按图纸自动生成。每 10 针/10 行粗参考线。</div>
+          <div class="legend-note">每格保留 MARD 色号；网页全图适应窗口时字会变小，请用缩放条或双指放大查看。PNG 与 PDF 使用更大的格子和清晰字形；PDF 为单页整图，页面尺寸按图纸自动生成。</div>
         </section>
 
         <section class="step-card material-input-card">
@@ -110,11 +112,14 @@
           <div class="table-wrap"><table><thead><tr><th>颜色</th><th>数量</th><th>占比</th><th>估算线长</th></tr></thead><tbody id="materialsBody"><tr><td colspan="4" class="empty-result">暂无数据</td></tr></tbody></table></div>
           <div class="total-material"><span>总针数</span><strong id="totalStitches">—</strong></div>
         </section>
-        <section class="tips-section"><strong>使用提示</strong><p>图纸生成完全在本地浏览器内完成，图片不会上传服务器。大尺寸图纸建议先导出 PNG，再进行打印或分块制作。</p></section>
+        <section class="tips-section"><strong>使用提示</strong><p>图纸生成完全在本地浏览器内完成，图片不会上传服务器。PDF 是单页大画布，下载后放大即可查看色号；若要实体打印，请按纸张大小选择“适应页面”或使用更大纸张。</p></section>
       </aside>
     </main>
 
     <div id="toast" class="toast" role="status"></div>
+    <div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
+      <div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><strong id="loadingTitle">正在处理</strong><span id="loadingDetail">请稍候，处理完成前页面不会响应其他操作。</span></div>
+    </div>
     <script src="mard-palette.js"></script>
     <script src="app.js"></script>
   </body>
