@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8f5ef" />
     <title>拼豆图纸生成器</title>
-    <link rel="stylesheet" href="styles.css?v=0.6.2" />
+    <link rel="stylesheet" href="styles.css?v=0.6.3" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.2</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.3</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -41,7 +41,7 @@
             </div>
           </div>
           <div id="qualityInfo" class="quality-info hidden"></div>
-          <label class="select-field precision-field"><span>自动生成精度（原图比例 + MARD 色数）</span><select id="precisionSelect" disabled><option>上传图片后自动计算</option></select></label>
+          <label class="select-field precision-field"><span>自动生成精度（原图比例 + MARD SKU）</span><select id="precisionSelect" disabled><option>上传图片后自动计算</option></select></label>
           <button id="bigjpgButton" class="button button-outline bigjpg-button" type="button" disabled>图片太小？去 Bigjpg 高清化</button>
           <p class="hint">高清化后请下载结果，再重新上传到这里。Bigjpg 处理不会自动上传你的图片。</p>
           <label class="check-row">
@@ -53,16 +53,16 @@
 
         <section class="step-card">
         <div class="step-heading"><span class="step-number">2</span><h2>提取主色</h2><span class="section-note">MARD SKU 标准色</span></div>
-        <label class="select-field"><span>使用 MARD 色数 <small>标准色卡档位</small></span><select id="colorCount">
-          <option value="24">24 色 · 基础精度</option>
-          <option value="48">48 色 · 细节增强</option>
-          <option value="72">72 色 · 中等精度</option>
-          <option value="96">96 色 · 高清</option>
-          <option value="120">120 色 · 高精度</option>
-          <option value="144">144 色 · 超清</option>
-          <option value="216">216 色 · 极高精度</option>
-          <option value="264">264 色 · MARD 高精度全色档</option>
-        </select></label>
+        <fieldset class="sku-fieldset"><legend>使用 MARD SKU <small>可跨系列组合</small></legend><div id="skuOptions" class="sku-options">
+          <label><input class="sku-option" type="checkbox" value="24" checked /><span>24色<small>区域 1</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="48" /><span>48色<small>区域 1、2</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="72" /><span>72色<small>区域 1～3</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="96" /><span>96色<small>区域 1～4</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="120" /><span>120色<small>区域 A～E</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="144" /><span>144色<small>A～E、6</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="216" /><span>216色<small>A～E、6、9～11</small></span></label>
+          <label><input class="sku-option" type="checkbox" value="264" /><span>264色<small>A～E、6～11</small></span></label>
+        </div><p id="skuSelectionHint" class="hint">已选择：24色（区域1）</p></fieldset>
           <p class="label-title">颜色标准</p>
           <div class="radio-card selected"><span><strong>MARD SKU 标准色卡</strong><small>每个格子对应可采购的 MARD 色号</small></span></div>
           <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，并通过 CIEDE2000 感知色差精确匹配色号，不会调用档位外的颜色。</p>
@@ -84,6 +84,7 @@
           </div>
           <label class="check-row"><input id="dither" type="checkbox" checked /><span>细节抖动 <em>（改善渐变和照片相似度）</em></span></label>
           <label class="check-row"><input id="majorityFilter" type="checkbox" /><span>多数投票滤波 <em>（清除孤立杂点，可能牺牲细节）</em></span></label>
+          <label class="check-row"><input id="regionUnify" type="checkbox" checked /><span>大面积相似区域统一颜色 <em>（减少同一区域的零散近似色）</em></span></label>
           <label class="check-row"><input id="showCodes" type="checkbox" checked /><span>格子显示色号 <em>（导出 PDF 固定保留）</em></span></label>
           <p class="label-title">边缘处理</p>
           <div class="segmented"><label><input type="radio" name="edgeMode" value="auto" checked /><span>自动</span></label><label><input type="radio" name="edgeMode" value="sharp" /><span>锐利</span></label><label><input type="radio" name="edgeMode" value="smooth" /><span>平滑</span></label></div>
@@ -138,8 +139,8 @@
     <div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
       <div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><strong id="loadingTitle">正在处理</strong><span id="loadingDetail">请稍候，处理完成前页面不会响应其他操作。</span></div>
     </div>
-  <script src="mard-palette.js?v=0.6.2"></script>
-  <script src="mard-reference-221.js?v=0.6.2"></script>
-  <script src="app.js?v=0.6.2"></script>
+  <script src="mard-palette.js?v=0.6.3"></script>
+  <script src="mard-reference-221.js?v=0.6.3"></script>
+  <script src="app.js?v=0.6.3"></script>
   </body>
 </html>

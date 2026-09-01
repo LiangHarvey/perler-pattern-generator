@@ -5,8 +5,8 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), over500Substitute: $("#over500Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
-    gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
+    denoise: $("#denoise"), skuOptions: $("#skuOptions"), skuSelectionHint: $("#skuSelectionHint"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), over500Substitute: $("#over500Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
+    gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), regionUnify: $("#regionUnify"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
     showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
     appShell: $(".app-shell"), controlsPanel: $(".controls-panel"), resultsPanel: $(".results-panel"), toggleControls: $("#toggleControls"), toggleResults: $("#toggleResults"), fitPattern: $("#fitPattern"), loadingOverlay: $("#loadingOverlay"), loadingTitle: $("#loadingTitle"), loadingDetail: $("#loadingDetail")
@@ -73,7 +73,7 @@
   let sourceImage = null;
   let sourceFile = null;
   let sourceBounds = null;
-  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", requestedColorCount: 24, stats: [], substitutions: [], autoFit: false };
+  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", requestedSkus: [24], requestedColorCount: 24, stats: [], substitutions: [], autoFit: false };
   let toastTimer;
   let busy = false;
 
@@ -206,9 +206,19 @@
   function setStatus(message, ready = false) { if (els.statusText) els.statusText.textContent = message; if (els.liveDot) els.liveDot.classList.toggle("ready", ready); }
   function setDisabled(element, disabled) { if (element) element.disabled = disabled; }
   function syncColorCountLabel() {
-    if (els.colorCountValue && els.colorCount) els.colorCountValue.textContent = els.colorCount.value;
+    normalizeSkuSelection();
     updatePaletteValidation();
   }
+  const SKU_CHAINS = [[24, 48, 72, 96], [120, 144, 216, 264]];
+  function selectedSkus() { return $$(".sku-option:checked").map((input) => Number(input.value)).sort((a, b) => a - b); }
+  function normalizeSkuSelection() {
+    const selected = new Set(selectedSkus());
+    SKU_CHAINS.forEach((chain) => { const highest = chain.reduce((max, sku, index) => selected.has(sku) ? index : max, -1); for (let index = 0; index <= highest; index++) selected.add(chain[index]); });
+    if (!selected.size) selected.add(24);
+    $$(".sku-option").forEach((input) => { input.checked = selected.has(Number(input.value)); });
+    if (els.skuSelectionHint) els.skuSelectionHint.textContent = `已选择：${[...selected].sort((a, b) => a - b).map((sku) => `${sku}色`).join(" + ")}；同系列高档自动包含低档。`;
+  }
+  function setSkuSelection(skus) { const wanted = new Set(skus.map(Number)); $$(".sku-option").forEach((input) => { input.checked = wanted.has(Number(input.value)); }); normalizeSkuSelection(); }
   function validDimension(input, fallback) { const n = Number(input.value); return Number.isFinite(n) ? Math.max(8, Math.min(240, Math.round(n))) : fallback; }
 
   function setLoading(visible, title = "正在处理", detail = "请稍候，处理完成前页面不会响应其他操作。") {
@@ -310,9 +320,10 @@
 
   function paletteForStyle() { return activeMardPalette(); }
 
-  function skuRequestedIds(colorCount) {
-    const groupNames = MARD_SUBSET_TIERS[Number(colorCount)];
-    return groupNames ? [...new Set(groupNames.flatMap((groupName) => MARD_SUBSET_GROUPS[groupName] || []).map(canonicalMardId))] : [];
+  function skuRequestedIds(skus) {
+    const selected = Array.isArray(skus) ? skus : [Number(skus)];
+    const groupNames = [...new Set(selected.flatMap((sku) => MARD_SUBSET_TIERS[Number(sku)] || []))];
+    return [...new Set(groupNames.flatMap((groupName) => MARD_SUBSET_GROUPS[groupName] || []).map(canonicalMardId))];
   }
 
   function skuPaletteValidation(colorCount) {
@@ -334,33 +345,34 @@
   }
 
   function updatePaletteValidation() {
-    if (!els.paletteValidation || !els.colorCount) return;
-    const colorCount = Number(els.colorCount.value);
-    const validation = skuPaletteValidation(colorCount);
+    if (!els.paletteValidation) return;
+    const skus = selectedSkus();
+    const validation = skuPaletteValidation(skus);
+    const skuLabel = skus.map((sku) => `${sku}色`).join(" + ");
     if (!validation.missingIds.length) {
       els.paletteValidation.classList.remove("warning");
-      els.paletteValidation.textContent = `${colorCount} 色 SKU：${validation.matchedPalette.length} 个色号均已匹配有效 HEX 与 RGB。`;
+      els.paletteValidation.textContent = `${skuLabel}：合并后 ${validation.matchedPalette.length} 个色号均已匹配有效 HEX 与 RGB。`;
       return;
     }
     els.paletteValidation.classList.add("warning");
     const mapped = validation.proxyMappings.filter((item) => item.replacement);
     const unmapped = validation.proxyMappings.filter((item) => !item.replacement).map((item) => item.missingId);
     const mappingText = mapped.map((item) => `${item.missingId}→${item.replacement.id}(ΔE ${item.distance.toFixed(1)})`).join("、");
-    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，已匹配 ${validation.matchedPalette.length} 色；缺失 ${validation.missingIds.length} 色已按相近有效色号替代：${mappingText}${unmapped.length ? `；仍无法替代：${unmapped.join("、")}` : ""}。`;
+    els.paletteValidation.textContent = `${skuLabel} 合并后应有 ${validation.requestedIds.length} 个不重复色号，已匹配 ${validation.matchedPalette.length} 色；缺失 ${validation.missingIds.length} 色已按相近有效色号替代：${mappingText}${unmapped.length ? `；仍无法替代：${unmapped.join("、")}` : ""}。`;
   }
 
-  function paletteForColorCount(colorCount) {
-    const validation = skuPaletteValidation(colorCount);
-    if (validation.missingIds.length) console.warn(`MARD ${colorCount} 色 SKU 缺少 HEX/RGB，已使用相近有效色号：${validation.proxyMappings.filter((item) => item.replacement).map((item) => `${item.missingId}->${item.replacement.id}`).join(", ")}`);
+  function paletteForColorCount(skus) {
+    const validation = skuPaletteValidation(skus);
+    if (validation.missingIds.length) console.warn(`MARD SKU 缺少 HEX/RGB，已使用相近有效色号：${validation.proxyMappings.filter((item) => item.replacement).map((item) => `${item.missingId}->${item.replacement.id}`).join(", ")}`);
     const colors = new Map(validation.matchedPalette.map((color) => [canonicalMardId(color.id), color]));
     validation.proxyMappings.filter((item) => item.replacement).forEach((item) => colors.set(canonicalMardId(item.replacement.id), item.replacement));
     return colors.size ? [...colors.values()] : activeMardPalette();
   }
 
-  function applyBase24Substitutions(pattern, mode, requestedColorCount) {
+  function applyBase24Substitutions(pattern, mode, requestedSkus) {
     const over500Enabled = Boolean(els.over500Substitute && els.over500Substitute.checked);
-    if (mode !== "mard" || requestedColorCount <= 24 || !over500Enabled) return { pattern, substitutions: [] };
-    const basePalette = paletteForColorCount(24);
+    if (mode !== "mard" || (requestedSkus.length === 1 && requestedSkus[0] === 24) || !over500Enabled) return { pattern, substitutions: [] };
+    const basePalette = paletteForColorCount([24]);
     const baseIds = new Set(basePalette.map((color) => canonicalMardId(color.id)));
     const counts = new Map();
     const sourceColors = new Map();
@@ -408,13 +420,13 @@
     const bounds = sourceContentBounds();
     const width = validDimension(els.gridWidth, 120);
     const height = validDimension(els.gridHeight, 140);
-    const colorCount = els.colorCount ? Number(els.colorCount.value) || 24 : 24;
+    const skuLabel = selectedSkus().map((sku) => sku).join("+");
     const pixelsPerBead = Math.min(bounds.width / width, bounds.height / height);
     const sourceShortSide = Math.min(bounds.width, bounds.height);
     const isLowResolution = sourceShortSide < 128 || pixelsPerBead < 2;
     const resolutionText = pixelsPerBead >= 1 ? `${pixelsPerBead.toFixed(1)} px/格` : "低于 1 px/格";
     const cropText = bounds.height < sourceHeight * .98 ? ` · 有效画面 ${Math.round(bounds.width)} × ${Math.round(bounds.height)}px` : "";
-    els.qualityInfo.innerHTML = `<strong>原图 ${sourceWidth} × ${sourceHeight}px</strong>${cropText}<br>当前 ${width} × ${height} 格 · MARD ${colorCount} 色 · ${resolutionText}<br>${isLowResolution ? "原图细节不足，建议先用 Bigjpg 放大后再生成。" : "网格精度与 MARD 色数已联动推荐；越往下精度越高、格子和材料种类越多。"}`;
+    els.qualityInfo.innerHTML = `<strong>原图 ${sourceWidth} × ${sourceHeight}px</strong>${cropText}<br>当前 ${width} × ${height} 格 · MARD SKU ${skuLabel} · ${resolutionText}<br>${isLowResolution ? "原图细节不足，建议先用 Bigjpg 放大后再生成。" : "网格精度与 MARD SKU 已联动推荐；也可组合数字与字母区域系列。"}`;
     els.qualityInfo.classList.remove("hidden");
     els.qualityInfo.classList.toggle("warning", isLowResolution);
   }
@@ -451,7 +463,7 @@
       els.precisionSelect.value = `${defaultOption.width}x${defaultOption.height}`;
       els.gridWidth.value = defaultOption.width;
       els.gridHeight.value = defaultOption.height;
-      if (els.colorCount) els.colorCount.value = String(defaultOption.colors);
+      setSkuSelection([defaultOption.colors]);
       syncColorCountLabel();
     }
     els.precisionSelect.disabled = false;
@@ -464,7 +476,7 @@
     if (!option || !option.dataset.width) return;
     els.gridWidth.value = option.dataset.width;
     els.gridHeight.value = option.dataset.height;
-    if (els.colorCount && option.dataset.colors) els.colorCount.value = option.dataset.colors;
+    if (option.dataset.colors) setSkuSelection([Number(option.dataset.colors)]);
     syncColorCountLabel();
     markPatternStale("精度已改变，请重新生成图解");
     updateQualityInfo();
@@ -548,7 +560,8 @@
       image.onload = () => {
         sourceImage = image;
         sourceBounds = detectContentBounds(image);
-        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], substitutions: [], width: 0, height: 0, requestedColorCount: Number(els.colorCount.value) || 24, autoFit: false };
+        const skus = selectedSkus();
+        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], substitutions: [], width: 0, height: 0, requestedSkus: skus, requestedColorCount: Math.max(...skus), autoFit: false };
         els.sourceThumb.src = image.src;
         els.fileName.textContent = file.name;
         els.fileDimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}px`;
@@ -714,6 +727,30 @@
     return result;
   }
 
+  function unifyLargeSimilarAreas(pattern, pixels, width, height) {
+    const result = pattern.slice();
+    const visited = new Uint8Array(pattern.length);
+    const minimumArea = Math.max(12, Math.ceil(pattern.length * .002));
+    const similar = (a, b) => { const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2]; return dr * dr + dg * dg + db * db <= 18 * 18; };
+    for (let start = 0; start < pattern.length; start++) {
+      if (visited[start]) continue;
+      const queue = [start], component = []; visited[start] = 1;
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const index = queue[cursor]; component.push(index);
+        const x = index % width, y = Math.floor(index / width);
+        const neighbors = [x > 0 ? index - 1 : -1, x + 1 < width ? index + 1 : -1, y > 0 ? index - width : -1, y + 1 < height ? index + width : -1];
+        neighbors.forEach((next) => { if (next >= 0 && !visited[next] && similar(pixels[index], pixels[next])) { visited[next] = 1; queue.push(next); } });
+      }
+      if (component.length < minimumArea) continue;
+      const counts = new Map(); component.forEach((index) => counts.set(pattern[index].id, (counts.get(pattern[index].id) || 0) + 1));
+      const [winnerId, winnerCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (winnerCount / component.length < .55) continue;
+      const winner = component.map((index) => pattern[index]).find((color) => color.id === winnerId);
+      component.forEach((index) => { result[index] = winner; });
+    }
+    return result;
+  }
+
   function paletteFrequencyOrder(pixels, palette) {
     const counts = new Array(palette.length).fill(0);
     const totalDistance = new Array(palette.length).fill(0);
@@ -742,11 +779,11 @@
     return [...buckets.values()].sort((a, b) => b.count - a.count).slice(0, desiredCount).map((bucket) => ({ rgb: bucket.sum.map((value) => value / bucket.count), count: bucket.count }));
   }
 
-  function analyzePixels(pixels, desiredCount) {
+  function analyzePixels(pixels, skus) {
     const mode = "mard";
     const style = getPaletteStyle();
-    const sampledPixels = pixels.filter((_, index) => index % Math.max(1, Math.floor(pixels.length / 6000)) === 0);
-    const candidatePalette = paletteForColorCount(desiredCount);
+    const candidatePalette = paletteForColorCount(skus);
+    const desiredCount = candidatePalette.length;
     const rankedPalette = paletteFrequencyOrder(pixels, candidatePalette);
     const clusters = rankedPalette.slice(0, desiredCount).map(({ color, count }) => ({ rgb: color.rgb, count }));
     return { mode, style, clusters, selectedColors: buildSelectedColors(clusters, mode, style, desiredCount, pixels, rankedPalette, candidatePalette) };
@@ -755,7 +792,7 @@
   function extract() {
     if (busy) return;
     if (!sourceImage) return showToast("请先上传图片");
-    const width = validDimension(els.gridWidth, 120), height = validDimension(els.gridHeight, 140), colorCount = Number(els.colorCount.value);
+    const width = validDimension(els.gridWidth, 120), height = validDimension(els.gridHeight, 140), skus = selectedSkus();
     els.gridWidth.value = width; els.gridHeight.value = height;
     setLoading(true, "正在提取主色", "正在分析图像并匹配 MARD 色卡，请稍候…");
     setStatus("正在提取颜色…");
@@ -765,8 +802,8 @@
         const pixels = [];
         const radius = denoiseRadius(width, height);
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
-        const { mode, style, clusters, selectedColors } = analyzePixels(pixels, colorCount);
-        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedColorCount = colorCount; state.width = width; state.height = height; state.sourcePixels = pixels; state.substitutions = [];
+        const { mode, style, clusters, selectedColors } = analyzePixels(pixels, skus);
+        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedSkus = skus; state.requestedColorCount = Math.max(...skus); state.width = width; state.height = height; state.sourcePixels = pixels; state.substitutions = [];
         renderExtractedColors();
         if (els.extractedResultDetails) els.extractedResultDetails.open = false;
         setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
@@ -791,13 +828,14 @@
         const data = drawSourceToGrid(width, height), pixels = [];
         const radius = denoiseRadius(width, height);
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
-        const { mode, style, clusters, selectedColors } = analyzePixels(pixels, Number(els.colorCount.value));
+        const skus = selectedSkus();
+        const { mode, style, clusters, selectedColors } = analyzePixels(pixels, skus);
         let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
         if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
-        const requestedColorCount = Number(els.colorCount.value);
-        const substitutionResult = applyBase24Substitutions(pattern, mode, requestedColorCount);
+        if (els.regionUnify && els.regionUnify.checked) pattern = unifyLargeSimilarAreas(pattern, pixels, width, height);
+        const substitutionResult = applyBase24Substitutions(pattern, mode, skus);
         pattern = substitutionResult.pattern;
-        state = { ...state, clusters, selectedColors: finalPaletteFromPattern(pattern), pattern, width, height, mode, paletteStyle: style, requestedColorCount, substitutions: substitutionResult.substitutions, sourcePixels: pixels };
+        state = { ...state, clusters, selectedColors: finalPaletteFromPattern(pattern), pattern, width, height, mode, paletteStyle: style, requestedSkus: skus, requestedColorCount: Math.max(...skus), substitutions: substitutionResult.substitutions, sourcePixels: pixels };
         renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
         if (els.extractedResultDetails) els.extractedResultDetails.open = false;
         if (els.generatedResultDetails) els.generatedResultDetails.open = false;
@@ -820,7 +858,7 @@
   function renderExtractedColors() {
     if (els.extractedColors) els.extractedColors.innerHTML = state.selectedColors.map((color) => `<div class="swatch"><div class="swatch-color" style="background:${rgbCss(color.rgb)}"></div><label>${escapeHtml(color.id)}</label></div>`).join("");
     if (els.extractedResultSummary) els.extractedResultSummary.textContent = state.selectedColors.length ? `${state.selectedColors.length} 色 · 点击展开查看` : "尚未提取";
-    if (els.modeBadge) els.modeBadge.textContent = `MARD ${state.requestedColorCount || state.selectedColors.length} 色档（SKU限定）`;
+    if (els.modeBadge) els.modeBadge.textContent = `MARD SKU ${state.requestedSkus.join("+")}（合并去重）`;
   }
 
   const MARD_FAMILY_NAMES = Object.freeze({
@@ -836,6 +874,20 @@
 
   function colorFamilyName(color) {
     return MARD_FAMILY_NAMES[mardSeries(color.id)] || "标准色";
+  }
+
+  function colorRegions(colorId) {
+    const id = canonicalMardId(colorId);
+    return Object.entries(MARD_SUBSET_GROUPS).filter(([, ids]) => ids.map(canonicalMardId).includes(id)).map(([region]) => region);
+  }
+
+  function colorSkuMembership(colorId) {
+    const id = canonicalMardId(colorId);
+    return Object.keys(MARD_SUBSET_TIERS).map(Number).filter((sku) => skuRequestedIds([sku]).includes(id));
+  }
+
+  function colorSourceMeta(colorId) {
+    return `区域 ${colorRegions(colorId).join("/") || "—"} · SKU ${colorSkuMembership(colorId).map((sku) => `${sku}色`).join("/") || "—"}`;
   }
 
   function patternMaterialRows() {
@@ -868,7 +920,7 @@
     const footerFontSize = Math.max(10, Math.min(18, Math.round(cellSize * .72)));
     const footerColumns = baseCanvasWidth >= 1100 ? 4 : baseCanvasWidth >= 760 ? 3 : baseCanvasWidth >= 480 ? 2 : 1;
     const footerRows = Math.max(1, Math.ceil(Math.max(1, patternMaterialRows().length) / footerColumns));
-    const footerItemHeight = Math.max(state.substitutions.length ? 56 : 42, Math.round(cellSize * (state.substitutions.length ? 3.3 : 2.6)));
+    const footerItemHeight = Math.max(state.substitutions.length ? 72 : 60, Math.round(cellSize * (state.substitutions.length ? 4.1 : 3.5)));
     const footerHeight = footerPadding * 2 + footerFontSize * 2.2 + footerRows * footerItemHeight + footerFontSize * 4.4;
     const footerTop = originY + height * cellSize + bottomAxis + outerBorder + footerGap;
     return {
@@ -930,11 +982,14 @@
       context.fillStyle = "#77736b";
       context.font = `400 ${Math.max(9, layout.footerFontSize * .9)}px Arial, "Microsoft YaHei", sans-serif`;
       context.fillText(`${count.toLocaleString()} 颗`, x + swatchSize + 10, y + layout.footerFontSize * 1.45);
+      context.fillStyle = "#77736b";
+      context.font = `400 ${Math.max(8, layout.footerFontSize * .72)}px Arial, "Microsoft YaHei", sans-serif`;
+      context.fillText(colorSourceMeta(color.id), x + swatchSize + 10, y + layout.footerFontSize * 2.45);
       const notes = substitutionNotesFor(color.id);
       if (notes.length) {
         context.fillStyle = "#8b5a21";
         context.font = `600 ${Math.max(8, layout.footerFontSize * .72)}px Arial, "Microsoft YaHei", sans-serif`;
-        context.fillText(`基础24替代：${notes.map((item) => `${item.from.id}→${item.to.id} ${item.count}颗`).join("；")}`, x + swatchSize + 10, y + layout.footerFontSize * 2.65);
+        context.fillText(`基础24替代：${notes.map((item) => `${item.from.id}→${item.to.id} ${item.count}颗`).join("；")}`, x + swatchSize + 10, y + layout.footerFontSize * 3.45);
       }
     });
     const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + layout.footerFontSize * .6;
@@ -1041,7 +1096,7 @@
   function renderLegend() {
     if (!els.legend) return;
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
-    els.legend.innerHTML = state.selectedColors.map((color) => { const notes = substitutionNotesFor(color.id); return `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small>${notes.length ? `<span class="replacement-note">24色基础替代：${notes.map((item) => `${escapeHtml(item.from.id)}→${escapeHtml(item.to.id)}（${item.count}颗，ΔE ${item.distance.toFixed(2)}）`).join("；")}</span>` : ""}</div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`; }).join("");
+    els.legend.innerHTML = state.selectedColors.map((color) => { const notes = substitutionNotesFor(color.id); return `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small><small>${escapeHtml(colorSourceMeta(color.id))}</small>${notes.length ? `<span class="replacement-note">24色基础替代：${notes.map((item) => `${escapeHtml(item.from.id)}→${escapeHtml(item.to.id)}（${item.count}颗，ΔE ${item.distance.toFixed(2)}）`).join("；")}</span>` : ""}</div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`; }).join("");
     if (els.generatedResultSummary) els.generatedResultSummary.textContent = state.pattern.length ? `${state.width} × ${state.height} 格 · 点击展开查看` : "生成图解后显示";
   }
 
@@ -1050,7 +1105,7 @@
     const total = state.pattern.length;
     const rows = patternMaterialRows();
     state.stats = rows;
-    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => { const notes = substitutionNotesFor(color.id); return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}${notes.length ? `<span class="replacement-note">替代 ${notes.map((item) => `${escapeHtml(item.from.id)} ${item.count}颗`).join("、")}</span>` : ""}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`; }).join("");
+    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => { const notes = substitutionNotesFor(color.id); return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}<span class="replacement-note">${escapeHtml(colorSourceMeta(color.id))}</span>${notes.length ? `<span class="replacement-note">替代 ${notes.map((item) => `${escapeHtml(item.from.id)} ${item.count}颗`).join("、")}</span>` : ""}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`; }).join("");
     if (els.totalStitches) els.totalStitches.textContent = total.toLocaleString();
   }
 
@@ -1061,7 +1116,7 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { const skuValidation = skuPaletteValidation(state.requestedColorCount); download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: "mard", palette: `MARD SKU ${state.requestedColorCount || state.selectedColors.length}`, missingSkuColorProxies: skuValidation.proxyMappings.filter((item) => item.replacement).map((item) => ({ missingId: item.missingId, replacementId: item.replacement.id, distance: item.distance })), base24Substitution: { enabled: Boolean(els.over500Substitute && els.over500Substitute.checked), rules: { minimumBeadsExclusive: 500, maximumDeltaE2000: 10 }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { const skuValidation = skuPaletteValidation(state.requestedSkus); download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: "mard", selectedSkus: state.requestedSkus, palette: `MARD SKU ${state.requestedSkus.join("+")}`, missingSkuColorProxies: skuValidation.proxyMappings.filter((item) => item.replacement).map((item) => ({ missingId: item.missingId, replacementId: item.replacement.id, distance: item.distance })), base24Substitution: { enabled: Boolean(els.over500Substitute && els.over500Substitute.checked), rules: { minimumBeadsExclusive: 500, maximumDeltaE2000: 10 }, replacements: state.substitutions }, colors: state.selectedColors.map((color) => ({ ...color, regions: colorRegions(color.id), skus: colorSkuMembership(color.id) })), cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
@@ -1128,7 +1183,7 @@
     const originTop = boardTop + layout.originY;
     const gridWidth = layout.gridWidth;
     const gridHeight = layout.gridHeight;
-    const paletteName = `MARD SKU ${state.requestedColorCount || state.selectedColors.length}`;
+    const paletteName = `MARD SKU ${state.requestedSkus.join("+")}`;
     const commands = [
       "q",
       pdfText(`Perler Pattern  ${state.width} x ${state.height} grid`, margin, 21, 12, [39, 37, 31], pageHeight),
@@ -1209,8 +1264,9 @@
       commands.push(pdfTextCentered(String(color.id), x + swatchSize / 2, top + 18, 8, contrastRgb(color.rgb), pageHeight));
       commands.push(pdfText(`${color.id} / ${mardSeries(color.id)} series`, x + swatchSize + 8, top + 10, 9, [47, 44, 39], pageHeight));
       commands.push(pdfText(`${count.toLocaleString()} beads`, x + swatchSize + 8, top + 23, 8, [112, 107, 98], pageHeight));
+      commands.push(pdfText(colorSourceMeta(color.id).replaceAll("区域", "Region").replaceAll("色", ""), x + swatchSize + 8, top + 35, 7, [112, 107, 98], pageHeight));
       const notes = substitutionNotesFor(color.id);
-      if (notes.length) commands.push(pdfText(`Base24: ${notes.map((item) => `${item.from.id}->${item.to.id} ${item.count}`).join("; ")}`, x + swatchSize + 8, top + 35, 7, [139, 90, 33], pageHeight));
+      if (notes.length) commands.push(pdfText(`Base24: ${notes.map((item) => `${item.from.id}->${item.to.id} ${item.count}`).join("; ")}`, x + swatchSize + 8, top + 47, 7, [139, 90, 33], pageHeight));
     });
     const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + 11;
     commands.push(pdfText(`Total beads: ${state.pattern.length.toLocaleString()}`, footerLeft + layout.footerPadding, summaryTop, 11, [37, 34, 31], pageHeight));
@@ -1282,14 +1338,13 @@
   ["dragenter", "dragover"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.add("dragging"); }));
   ["dragleave", "drop"].forEach((eventName) => els.dropZone.addEventListener(eventName, (event) => { event.preventDefault(); els.dropZone.classList.remove("dragging"); }));
   els.dropZone.addEventListener("drop", (event) => loadImage(event.dataTransfer.files[0]));
-  ["input", "change"].forEach((eventName) => els.colorCount.addEventListener(eventName, () => {
-    syncColorCountLabel();
+  $$(".sku-option").forEach((input) => input.addEventListener("change", () => {
+    normalizeSkuSelection(); updatePaletteValidation();
     if (els.precisionSelect && !els.precisionSelect.disabled) els.precisionSelect.value = "custom";
-    markPatternStale("MARD 色数已改变，请重新生成图解");
-    updateQualityInfo();
+    markPatternStale("MARD SKU 已改变，请重新生成图解"); updateQualityInfo();
   }));
   if (els.paletteStyle) els.paletteStyle.addEventListener("change", () => markPatternStale("颜色参数已改变，请重新生成图解"));
-  [els.denoise, els.dither, els.majorityFilter, els.over500Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
+  [els.denoise, els.dither, els.majorityFilter, els.regionUnify, els.over500Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
   els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });
