@@ -5,7 +5,7 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), base24Substitute: $("#base24Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
+    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), base24Substitute: $("#base24Substitute"), over500Substitute: $("#over500Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
     showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
@@ -325,7 +325,16 @@
     const referenceIds = new Set(reference.map((color) => canonicalMardId(color.id)));
     const missingIds = requestedIds.filter((id) => !referenceIds.has(id));
     const matchedIds = new Set(requestedIds.filter((id) => referenceIds.has(id)));
-    return { requestedIds, missingIds, matchedPalette: reference.filter((color) => matchedIds.has(canonicalMardId(color.id))) };
+    const matchedPalette = reference.filter((color) => matchedIds.has(canonicalMardId(color.id)));
+    const legacy = (window.MARD_PALETTE_291 || window.MARD_PALETTE_280 || []).map(clonePaletteColor);
+    const legacyById = new Map(legacy.map((color) => [canonicalMardId(color.id), color]));
+    const proxyMappings = missingIds.map((missingId) => {
+      const source = legacyById.get(missingId);
+      if (!source || !reference.length) return { missingId, source: null, replacement: null, distance: null };
+      const match = nearestMardMatch(source.rgb, reference);
+      return { missingId, source, replacement: match.color, distance: match.distance };
+    });
+    return { requestedIds, missingIds, matchedPalette, proxyMappings };
   }
 
   function updatePaletteValidation() {
@@ -338,17 +347,24 @@
       return;
     }
     els.paletteValidation.classList.add("warning");
-    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，图2/3已匹配 ${validation.matchedPalette.length} 色；未匹配 ${validation.missingIds.length} 色：${validation.missingIds.join("、")}。未匹配颜色不会参与生成。`;
+    const mapped = validation.proxyMappings.filter((item) => item.replacement);
+    const unmapped = validation.proxyMappings.filter((item) => !item.replacement).map((item) => item.missingId);
+    const mappingText = mapped.map((item) => `${item.missingId}→${item.replacement.id}(ΔE ${item.distance.toFixed(1)})`).join("、");
+    els.paletteValidation.textContent = `${colorCount} 色 SKU 应有 ${validation.requestedIds.length} 色，图2/3已匹配 ${validation.matchedPalette.length} 色；缺失 ${validation.missingIds.length} 色已按相近有效色号替代：${mappingText}${unmapped.length ? `；仍无法替代：${unmapped.join("、")}` : ""}。`;
   }
 
   function paletteForColorCount(colorCount) {
     const validation = skuPaletteValidation(colorCount);
-    if (validation.missingIds.length) console.warn(`MARD ${colorCount} 色 SKU 缺少 HEX/RGB：${validation.missingIds.join(", ")}`);
-    return validation.matchedPalette.length ? validation.matchedPalette : activeMardPalette();
+    if (validation.missingIds.length) console.warn(`MARD ${colorCount} 色 SKU 缺少 HEX/RGB，已使用相近有效色号：${validation.proxyMappings.filter((item) => item.replacement).map((item) => `${item.missingId}->${item.replacement.id}`).join(", ")}`);
+    const colors = new Map(validation.matchedPalette.map((color) => [canonicalMardId(color.id), color]));
+    validation.proxyMappings.filter((item) => item.replacement).forEach((item) => colors.set(canonicalMardId(item.replacement.id), item.replacement));
+    return colors.size ? [...colors.values()] : activeMardPalette();
   }
 
   function applyBase24Substitutions(pattern, mode, requestedColorCount) {
-    if (mode !== "mard" || requestedColorCount <= 24 || !els.base24Substitute || !els.base24Substitute.checked) return { pattern, substitutions: [] };
+    const regularEnabled = Boolean(els.base24Substitute && els.base24Substitute.checked);
+    const over500Enabled = Boolean(els.over500Substitute && els.over500Substitute.checked);
+    if (mode !== "mard" || requestedColorCount <= 24 || (!regularEnabled && !over500Enabled)) return { pattern, substitutions: [] };
     const basePalette = paletteForColorCount(24);
     const baseIds = new Set(basePalette.map((color) => canonicalMardId(color.id)));
     const counts = new Map();
@@ -358,12 +374,14 @@
     const replacements = new Map();
     const substitutions = [];
     [...counts.entries()].sort((a, b) => b[1] - a[1]).forEach(([sourceId, count]) => {
-      if (count < minimumCount || baseIds.has(canonicalMardId(sourceId))) return;
+      if (baseIds.has(canonicalMardId(sourceId))) return;
       const sourceColor = sourceColors.get(sourceId);
       const match = nearestMardMatch(sourceColor.rgb, basePalette);
-      if (!match.color || match.distance > 6) return;
+      const regularMatch = regularEnabled && count >= minimumCount && match.distance <= 6;
+      const over500Match = over500Enabled && count > 500 && match.distance <= 10;
+      if (!match.color || (!regularMatch && !over500Match)) return;
       replacements.set(sourceId, match.color);
-      substitutions.push({ from: sourceColor, to: match.color, count, distance: match.distance });
+      substitutions.push({ from: sourceColor, to: match.color, count, distance: match.distance, reason: over500Match ? "over500" : "highUsage" });
     });
     return { pattern: replacements.size ? pattern.map((color) => replacements.get(color.id) || color) : pattern, substitutions };
   }
@@ -1058,7 +1076,7 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", base24Substitution: { enabled: Boolean(els.base24Substitute && els.base24Substitute.checked), rules: { minimumShare: .005, minimumBeads: 10, maximumDeltaE2000: 6 }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { const skuValidation = state.mode === "mard" ? skuPaletteValidation(state.requestedColorCount) : null; download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", missingSkuColorProxies: skuValidation ? skuValidation.proxyMappings.filter((item) => item.replacement).map((item) => ({ missingId: item.missingId, replacementId: item.replacement.id, distance: item.distance })) : [], base24Substitution: { enabled: Boolean((els.base24Substitute && els.base24Substitute.checked) || (els.over500Substitute && els.over500Substitute.checked)), rules: { highUsage: { minimumShare: .005, minimumBeads: 10, maximumDeltaE2000: 6 }, over500: { minimumBeadsExclusive: 500, maximumDeltaE2000: 10 } }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
@@ -1286,7 +1304,7 @@
     updateQualityInfo();
   }));
   if (els.paletteStyle) els.paletteStyle.addEventListener("change", () => markPatternStale("颜色参数已改变，请重新生成图解"));
-  [els.denoise, els.dither, els.majorityFilter, els.base24Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
+  [els.denoise, els.dither, els.majorityFilter, els.base24Substitute, els.over500Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
   els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });

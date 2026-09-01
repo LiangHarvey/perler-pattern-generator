@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8f5ef" />
     <title>拼豆图纸生成器</title>
-    <link rel="stylesheet" href="styles.css?v=0.6.0" />
+    <link rel="stylesheet" href="styles.css?v=0.6.1" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.0</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.6.1</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -70,6 +70,8 @@
           <div id="paletteValidation" class="palette-validation" role="status">正在校验 SKU 色号与 HEX/RGB…</div>
           <label class="check-row base24-option"><input id="base24Substitute" type="checkbox" /><span>24色基础色优先替代 <em>（仅替代高用量且足够相近的颜色）</em></span></label>
           <p class="hint">按用量从高到低检查：用量≥整图0.5%且≥10颗、与24色基础色的 CIEDE2000 色差≤6 才会替代；替代关系会写入图例、图纸底部及导出文件。</p>
+          <label class="check-row base24-option"><input id="over500Substitute" type="checkbox" /><span>超过500颗时替换为24色 <em>（相近颜色优先）</em></span></label>
+          <p class="hint">单个非基础色用量超过500颗时，若与24色基础色的 CIEDE2000 色差≤10，则替换并标注原色号、基础色号、数量和色差。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
           <details id="extractedResultDetails" class="result-disclosure" open>
             <summary><span class="disclosure-title">提取结果</span><span id="extractedResultSummary" class="disclosure-meta">上传图片后生成</span></summary>
@@ -139,8 +141,8 @@
     <div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
       <div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><strong id="loadingTitle">正在处理</strong><span id="loadingDetail">请稍候，处理完成前页面不会响应其他操作。</span></div>
     </div>
-  <script src="mard-palette.js?v=0.6.0"></script>
-  <script src="mard-reference-221.js?v=0.6.0"></script>
-  <script src="app.js?v=0.6.0"></script>
+  <script src="mard-palette.js?v=0.6.1"></script>
+  <script src="mard-reference-221.js?v=0.6.1"></script>
+  <script src="app.js?v=0.6.1"></script>
   </body>
 </html>
