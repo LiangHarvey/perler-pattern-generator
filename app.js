@@ -5,7 +5,7 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const els = {
     imageInput: $("#imageInput"), dropZone: $("#dropZone"), fileInfo: $("#fileInfo"), sourceThumb: $("#sourceThumb"), fileName: $("#fileName"), fileDimensions: $("#fileDimensions"), replaceImage: $("#replaceImage"), qualityInfo: $("#qualityInfo"), precisionSelect: $("#precisionSelect"), bigjpgButton: $("#bigjpgButton"),
-    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
+    denoise: $("#denoise"), colorCount: $("#colorCount"), colorCountValue: $("#colorCountValue"), paletteStyle: $("#paletteStyle"), paletteValidation: $("#paletteValidation"), base24Substitute: $("#base24Substitute"), extractColors: $("#extractColors"), extractedColors: $("#extractedColors"), extractedResultDetails: $("#extractedResultDetails"), extractedResultSummary: $("#extractedResultSummary"),
     gridWidth: $("#gridWidth"), gridHeight: $("#gridHeight"), dither: $("#dither"), majorityFilter: $("#majorityFilter"), generatePattern: $("#generatePattern"), density: $("#density"), refreshMaterials: $("#refreshMaterials"),
     canvas: $("#patternCanvas"), emptyState: $("#emptyState"), canvasViewport: $("#canvasViewport"), statusText: $("#statusText"), liveDot: $(".live-dot"), canvasMeta: $("#canvasMeta"), zoom: $("#zoom"), zoomValue: $("#zoomValue"),
     showCodes: $("#showCodes"), modeBadge: $("#modeBadge"), legend: $("#legend"), materialsBody: $("#materialsBody"), totalStitches: $("#totalStitches"), copyMaterials: $("#copyMaterials"), downloadPng: $("#downloadPng"), downloadPdf: $("#downloadPdf"), downloadJson: $("#downloadJson"), toast: $("#toast"), generatedResultDetails: $("#generatedResultDetails"), generatedResultSummary: $("#generatedResultSummary"),
@@ -73,7 +73,7 @@
   let sourceImage = null;
   let sourceFile = null;
   let sourceBounds = null;
-  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", requestedColorCount: 24, stats: [], autoFit: false };
+  let state = { clusters: [], selectedColors: [], pattern: [], width: 0, height: 0, mode: "mard", paletteStyle: "all", requestedColorCount: 24, stats: [], substitutions: [], autoFit: false };
   let toastTimer;
   let busy = false;
 
@@ -347,6 +347,37 @@
     return validation.matchedPalette.length ? validation.matchedPalette : activeMardPalette();
   }
 
+  function applyBase24Substitutions(pattern, mode, requestedColorCount) {
+    if (mode !== "mard" || requestedColorCount <= 24 || !els.base24Substitute || !els.base24Substitute.checked) return { pattern, substitutions: [] };
+    const basePalette = paletteForColorCount(24);
+    const baseIds = new Set(basePalette.map((color) => canonicalMardId(color.id)));
+    const counts = new Map();
+    const sourceColors = new Map();
+    pattern.forEach((color) => { counts.set(color.id, (counts.get(color.id) || 0) + 1); sourceColors.set(color.id, color); });
+    const minimumCount = Math.max(10, Math.ceil(pattern.length * .005));
+    const replacements = new Map();
+    const substitutions = [];
+    [...counts.entries()].sort((a, b) => b[1] - a[1]).forEach(([sourceId, count]) => {
+      if (count < minimumCount || baseIds.has(canonicalMardId(sourceId))) return;
+      const sourceColor = sourceColors.get(sourceId);
+      const match = nearestMardMatch(sourceColor.rgb, basePalette);
+      if (!match.color || match.distance > 6) return;
+      replacements.set(sourceId, match.color);
+      substitutions.push({ from: sourceColor, to: match.color, count, distance: match.distance });
+    });
+    return { pattern: replacements.size ? pattern.map((color) => replacements.get(color.id) || color) : pattern, substitutions };
+  }
+
+  function finalPaletteFromPattern(pattern) {
+    const colors = new Map();
+    pattern.forEach((color) => { if (!colors.has(color.id)) colors.set(color.id, color); });
+    return [...colors.values()];
+  }
+
+  function substitutionNotesFor(targetId) {
+    return (state.substitutions || []).filter((item) => item.to.id === targetId);
+  }
+
   function gridForShortSide(shortSide) {
     const bounds = sourceContentBounds();
     const sourceWidth = bounds.width;
@@ -506,7 +537,7 @@
       image.onload = () => {
         sourceImage = image;
         sourceBounds = detectContentBounds(image);
-        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], width: 0, height: 0, requestedColorCount: Number(els.colorCount.value) || 24, autoFit: false };
+        state = { ...state, clusters: [], selectedColors: [], pattern: [], stats: [], substitutions: [], width: 0, height: 0, requestedColorCount: Number(els.colorCount.value) || 24, autoFit: false };
         els.sourceThumb.src = image.src;
         els.fileName.textContent = file.name;
         els.fileDimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}px`;
@@ -731,7 +762,7 @@
         const radius = denoiseRadius(width, height);
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.push(averageGridColor(data, width, height, x, y, radius));
         const { mode, style, clusters, selectedColors } = analyzePixels(pixels, colorCount);
-        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedColorCount = colorCount; state.width = width; state.height = height; state.sourcePixels = pixels;
+        state.clusters = clusters; state.selectedColors = selectedColors; state.mode = mode; state.paletteStyle = style; state.requestedColorCount = colorCount; state.width = width; state.height = height; state.sourcePixels = pixels; state.substitutions = [];
         renderExtractedColors();
         if (els.extractedResultDetails) els.extractedResultDetails.open = false;
         setStatus(`已提取 ${state.selectedColors.length} 种颜色，等待生成图解`, true);
@@ -759,7 +790,10 @@
         const { mode, style, clusters, selectedColors } = analyzePixels(pixels, Number(els.colorCount.value));
         let pattern = mapPixelsToPattern(pixels, width, height, selectedColors, mode, els.dither.checked);
         if (els.majorityFilter.checked || getEdgeMode() === "smooth") pattern = majorityPass(pattern, width, height, getEdgeMode());
-        state = { ...state, clusters, selectedColors, pattern, width, height, mode, paletteStyle: style, requestedColorCount: Number(els.colorCount.value), sourcePixels: pixels };
+        const requestedColorCount = Number(els.colorCount.value);
+        const substitutionResult = applyBase24Substitutions(pattern, mode, requestedColorCount);
+        pattern = substitutionResult.pattern;
+        state = { ...state, clusters, selectedColors: finalPaletteFromPattern(pattern), pattern, width, height, mode, paletteStyle: style, requestedColorCount, substitutions: substitutionResult.substitutions, sourcePixels: pixels };
         renderExtractedColors(); renderPattern(); renderLegend(); renderMaterials();
         if (els.extractedResultDetails) els.extractedResultDetails.open = false;
         if (els.generatedResultDetails) els.generatedResultDetails.open = false;
@@ -767,7 +801,8 @@
         // In the vertical layout the upload/settings and legend targets remain
         // available above the chart after generation.
         setSidebarsHidden(false, false, false);
-        setStatus("图解已生成", true); showToast(`已生成 ${width} × ${height} 拼豆图纸`);
+        const replacementText = state.substitutions.length ? `，24色基础替代 ${state.substitutions.length} 组` : "";
+        setStatus(`图解已生成${replacementText}`, true); showToast(`已生成 ${width} × ${height} 拼豆图纸${replacementText}`);
         scheduleFitPattern();
       } catch (error) {
         setStatus("图解生成失败");
@@ -830,7 +865,7 @@
     const footerFontSize = Math.max(10, Math.min(18, Math.round(cellSize * .72)));
     const footerColumns = baseCanvasWidth >= 1100 ? 4 : baseCanvasWidth >= 760 ? 3 : baseCanvasWidth >= 480 ? 2 : 1;
     const footerRows = Math.max(1, Math.ceil(Math.max(1, patternMaterialRows().length) / footerColumns));
-    const footerItemHeight = Math.max(42, Math.round(cellSize * 2.6));
+    const footerItemHeight = Math.max(state.substitutions.length ? 56 : 42, Math.round(cellSize * (state.substitutions.length ? 3.3 : 2.6)));
     const footerHeight = footerPadding * 2 + footerFontSize * 2.2 + footerRows * footerItemHeight + footerFontSize * 4.4;
     const footerTop = originY + height * cellSize + bottomAxis + outerBorder + footerGap;
     return {
@@ -892,6 +927,12 @@
       context.fillStyle = "#77736b";
       context.font = `400 ${Math.max(9, layout.footerFontSize * .9)}px Arial, "Microsoft YaHei", sans-serif`;
       context.fillText(`${count.toLocaleString()} 颗`, x + swatchSize + 10, y + layout.footerFontSize * 1.45);
+      const notes = substitutionNotesFor(color.id);
+      if (notes.length) {
+        context.fillStyle = "#8b5a21";
+        context.font = `600 ${Math.max(8, layout.footerFontSize * .72)}px Arial, "Microsoft YaHei", sans-serif`;
+        context.fillText(`基础24替代：${notes.map((item) => `${item.from.id}→${item.to.id} ${item.count}颗`).join("；")}`, x + swatchSize + 10, y + layout.footerFontSize * 2.65);
+      }
     });
     const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + layout.footerFontSize * .6;
     context.fillStyle = "#25221f";
@@ -997,7 +1038,7 @@
   function renderLegend() {
     if (!els.legend) return;
     const counts = new Map(); state.pattern.forEach((color) => counts.set(color.id, (counts.get(color.id) || 0) + 1));
-    els.legend.innerHTML = state.selectedColors.map((color) => `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small></div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`).join("");
+    els.legend.innerHTML = state.selectedColors.map((color) => { const notes = substitutionNotesFor(color.id); return `<div class="legend-item"><div class="legend-color" style="background:${rgbCss(color.rgb)}"></div><div class="legend-main"><strong>${escapeHtml(color.id)} · ${escapeHtml(color.name)}</strong><small>${hex(color.rgb)} · RGB(${color.rgb.map((v) => Math.round(v)).join(",")})</small>${notes.length ? `<span class="replacement-note">24色基础替代：${notes.map((item) => `${escapeHtml(item.from.id)}→${escapeHtml(item.to.id)}（${item.count}颗，ΔE ${item.distance.toFixed(2)}）`).join("；")}</span>` : ""}</div><span class="legend-count">${counts.get(color.id) || 0}</span></div>`; }).join("");
     if (els.generatedResultSummary) els.generatedResultSummary.textContent = state.pattern.length ? `${state.width} × ${state.height} 格 · 点击展开查看` : "生成图解后显示";
   }
 
@@ -1006,18 +1047,18 @@
     const total = state.pattern.length;
     const rows = patternMaterialRows();
     state.stats = rows;
-    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`).join("");
+    els.materialsBody.innerHTML = rows.map(({ color, count, percent, length }) => { const notes = substitutionNotesFor(color.id); return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rgbCss(color.rgb)};margin-right:3px"></span>${escapeHtml(color.id)}${notes.length ? `<span class="replacement-note">替代 ${notes.map((item) => `${escapeHtml(item.from.id)} ${item.count}颗`).join("、")}</span>` : ""}</td><td>${count}</td><td>${percent.toFixed(2)}%</td><td>${length.toFixed(2)}m</td></tr>`; }).join("");
     if (els.totalStitches) els.totalStitches.textContent = total.toLocaleString();
   }
 
-  function materialText() { return ["拼豆材料清单", `图纸：${state.width} × ${state.height}`, "", "颜色\t数量\t占比\t估算线长", ...state.stats.map(({ color, count, percent, length }) => `${color.id} ${color.name}\t${count}\t${percent.toFixed(2)}%\t${length.toFixed(2)}m`), "", `总针数\t${state.pattern.length}`].join("\n"); }
+  function materialText() { const replacementLines = (state.substitutions || []).map((item) => `${item.from.id} → ${item.to.id}\t${item.count}颗\tΔE ${item.distance.toFixed(2)}`); return ["拼豆材料清单", `图纸：${state.width} × ${state.height}`, "", "颜色\t数量\t占比\t估算线长", ...state.stats.map(({ color, count, percent, length }) => `${color.id} ${color.name}\t${count}\t${percent.toFixed(2)}%\t${length.toFixed(2)}m`), ...(replacementLines.length ? ["", "24色基础替代（原色号 → 基础色号）", ...replacementLines] : []), "", `总针数\t${state.pattern.length}`].join("\n"); }
 
   function saveBlob(name, blob) {
     if (!blob) throw new Error("浏览器无法生成导出文件");
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   function download(name, content, type) { saveBlob(name, new Blob([content], { type })); }
-  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
+  function downloadJson() { download(`perler-pattern-${state.width}x${state.height}.json`, JSON.stringify({ width: state.width, height: state.height, mode: state.mode, palette: state.mode === "mard" ? `MARD SKU ${state.requestedColorCount || state.selectedColors.length} / supplied 221 HEX-RGB reference` : "cluster colors", base24Substitution: { enabled: Boolean(els.base24Substitute && els.base24Substitute.checked), rules: { minimumShare: .005, minimumBeads: 10, maximumDeltaE2000: 6 }, replacements: state.substitutions }, colors: state.selectedColors, cells: state.pattern.map((color) => color.id) }, null, 2), "application/json"); }
 
   function exportPng() {
     if (busy) return;
@@ -1165,6 +1206,8 @@
       commands.push(pdfTextCentered(String(color.id), x + swatchSize / 2, top + 18, 8, contrastRgb(color.rgb), pageHeight));
       commands.push(pdfText(`${color.id} / ${mardSeries(color.id)} series`, x + swatchSize + 8, top + 10, 9, [47, 44, 39], pageHeight));
       commands.push(pdfText(`${count.toLocaleString()} beads`, x + swatchSize + 8, top + 23, 8, [112, 107, 98], pageHeight));
+      const notes = substitutionNotesFor(color.id);
+      if (notes.length) commands.push(pdfText(`Base24: ${notes.map((item) => `${item.from.id}->${item.to.id} ${item.count}`).join("; ")}`, x + swatchSize + 8, top + 35, 7, [139, 90, 33], pageHeight));
     });
     const summaryTop = contentTop + layout.footerRows * layout.footerItemHeight + 11;
     commands.push(pdfText(`Total beads: ${state.pattern.length.toLocaleString()}`, footerLeft + layout.footerPadding, summaryTop, 11, [37, 34, 31], pageHeight));
@@ -1243,7 +1286,7 @@
     updateQualityInfo();
   }));
   if (els.paletteStyle) els.paletteStyle.addEventListener("change", () => markPatternStale("颜色参数已改变，请重新生成图解"));
-  [els.denoise, els.dither, els.majorityFilter].forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
+  [els.denoise, els.dither, els.majorityFilter, els.base24Substitute].filter(Boolean).forEach((input) => input.addEventListener("change", () => markPatternStale("图解参数已改变，请重新生成图解")));
   $$('input[name="edgeMode"]').forEach((input) => input.addEventListener("change", () => markPatternStale("边缘处理已改变，请重新生成图解")));
   els.extractColors.addEventListener("click", extract); els.generatePattern.addEventListener("click", generate); els.refreshMaterials.addEventListener("click", renderMaterials);
   els.zoom.addEventListener("input", () => { state.autoFit = false; applyZoom(); });
