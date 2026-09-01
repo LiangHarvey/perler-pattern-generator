@@ -94,6 +94,99 @@
     const bb = b && b.lab ? b.lab : rgbToLab(b && b.rgb ? b.rgb : b);
     return Math.hypot(aa[0] - bb[0], aa[1] - bb[1], aa[2] - bb[2]);
   }
+
+  // CIEDE2000 is substantially better than raw RGB/CIE76 at distinguishing
+  // visually similar MARD beads, especially neutrals, blue-purple and red-pink.
+  function deltaE2000(lab1, lab2) {
+    const [l1, a1, b1] = lab1;
+    const [l2, a2, b2] = lab2;
+    const c1 = Math.hypot(a1, b1);
+    const c2 = Math.hypot(a2, b2);
+    const cMean = (c1 + c2) / 2;
+    const cMean7 = cMean ** 7;
+    const g = .5 * (1 - Math.sqrt(cMean7 / (cMean7 + 25 ** 7)));
+    const a1Prime = (1 + g) * a1;
+    const a2Prime = (1 + g) * a2;
+    const c1Prime = Math.hypot(a1Prime, b1);
+    const c2Prime = Math.hypot(a2Prime, b2);
+    const hue = (a, b) => {
+      const degrees = Math.atan2(b, a) * 180 / Math.PI;
+      return degrees >= 0 ? degrees : degrees + 360;
+    };
+    const h1Prime = c1Prime < 1e-8 ? 0 : hue(a1Prime, b1);
+    const h2Prime = c2Prime < 1e-8 ? 0 : hue(a2Prime, b2);
+    const deltaLPrime = l2 - l1;
+    const deltaCPrime = c2Prime - c1Prime;
+    let deltaHuePrime = h2Prime - h1Prime;
+    if (c1Prime * c2Prime < 1e-8) deltaHuePrime = 0;
+    else if (deltaHuePrime > 180) deltaHuePrime -= 360;
+    else if (deltaHuePrime < -180) deltaHuePrime += 360;
+    const deltaHPrime = 2 * Math.sqrt(c1Prime * c2Prime) * Math.sin(deltaHuePrime * Math.PI / 360);
+    const lMeanPrime = (l1 + l2) / 2;
+    const cMeanPrime = (c1Prime + c2Prime) / 2;
+    let hMeanPrime;
+    if (c1Prime * c2Prime < 1e-8) hMeanPrime = h1Prime + h2Prime;
+    else if (Math.abs(h1Prime - h2Prime) <= 180) hMeanPrime = (h1Prime + h2Prime) / 2;
+    else if (h1Prime + h2Prime < 360) hMeanPrime = (h1Prime + h2Prime + 360) / 2;
+    else hMeanPrime = (h1Prime + h2Prime - 360) / 2;
+    const t = 1
+      - .17 * Math.cos((hMeanPrime - 30) * Math.PI / 180)
+      + .24 * Math.cos(2 * hMeanPrime * Math.PI / 180)
+      + .32 * Math.cos((3 * hMeanPrime + 6) * Math.PI / 180)
+      - .2 * Math.cos((4 * hMeanPrime - 63) * Math.PI / 180);
+    const deltaTheta = 30 * Math.exp(-(((hMeanPrime - 275) / 25) ** 2));
+    const cMeanPrime7 = cMeanPrime ** 7;
+    const rC = 2 * Math.sqrt(cMeanPrime7 / (cMeanPrime7 + 25 ** 7));
+    const lDelta = lMeanPrime - 50;
+    const sL = 1 + .015 * lDelta ** 2 / Math.sqrt(20 + lDelta ** 2);
+    const sC = 1 + .045 * cMeanPrime;
+    const sH = 1 + .015 * cMeanPrime * t;
+    const rT = -Math.sin(2 * deltaTheta * Math.PI / 180) * rC;
+    const lTerm = deltaLPrime / sL;
+    const cTerm = deltaCPrime / sC;
+    const hTerm = deltaHPrime / sH;
+    return Math.sqrt(Math.max(0, lTerm ** 2 + cTerm ** 2 + hTerm ** 2 + rT * cTerm * hTerm));
+  }
+
+  function mardPerceptualDistance(sourceLab, targetLab) {
+    const sourceChroma = Math.hypot(sourceLab[1], sourceLab[2]);
+    const targetChroma = Math.hypot(targetLab[1], targetLab[2]);
+    const neutralMismatch = Math.min(sourceChroma, targetChroma) < 7 && Math.max(sourceChroma, targetChroma) > 14
+      ? (Math.max(sourceChroma, targetChroma) - 14) * .18
+      : 0;
+    return deltaE2000(sourceLab, targetLab) + neutralMismatch;
+  }
+
+  function nearestMardMatch(rgb, colors) {
+    const pixelLab = rgbToLab(rgb);
+    const shortlist = [];
+    const shortlistSize = Math.min(8, colors.length);
+    for (let index = 0; index < colors.length; index++) {
+      const color = colors[index];
+      const lab = color.lab || rgbToLab(color.rgb || color);
+      const dL = pixelLab[0] - lab[0];
+      const dA = pixelLab[1] - lab[1];
+      const dB = pixelLab[2] - lab[2];
+      const quickDistance = dL * dL * 1.15 + dA * dA + dB * dB;
+      const candidate = { index, color, lab, quickDistance };
+      if (shortlist.length < shortlistSize) {
+        shortlist.push(candidate);
+        shortlist.sort((a, b) => a.quickDistance - b.quickDistance);
+      } else if (quickDistance < shortlist[shortlist.length - 1].quickDistance) {
+        shortlist[shortlist.length - 1] = candidate;
+        for (let position = shortlist.length - 1; position > 0 && shortlist[position].quickDistance < shortlist[position - 1].quickDistance; position--) {
+          const swap = shortlist[position - 1]; shortlist[position - 1] = shortlist[position]; shortlist[position] = swap;
+        }
+      }
+    }
+    let best = shortlist[0] || { index: 0, color: colors[0], lab: colors[0] ? colors[0].lab || rgbToLab(colors[0].rgb || colors[0]) : pixelLab };
+    let bestDistance = Infinity;
+    for (const candidate of shortlist) {
+      const distance = mardPerceptualDistance(pixelLab, candidate.lab);
+      if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+    }
+    return { color: best.color, index: best.index, distance: bestDistance };
+  }
   function clamp(v, min = 0, max = 255) { return Math.max(min, Math.min(max, v)); }
   function rgbCss(rgb) { return `rgb(${rgb.map((v) => Math.round(v)).join(",")})`; }
   function hex(rgb) { return "#" + rgb.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase(); }
@@ -480,7 +573,9 @@
     return centers.map((rgb, index) => ({ rgb, count: counts[index] })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count).slice(0, k);
   }
 
-  function nearestColor(rgb, colors) {
+  function nearestColor(rgb, colors, useMardMatching = false) {
+    if (!colors.length) throw new Error("当前 MARD 档位没有可用颜色");
+    if (useMardMatching) return nearestMardMatch(rgb, colors).color;
     let nearest = colors[0], distance = Infinity;
     const pixelLab = rgbToLab(rgb);
     for (const color of colors) {
@@ -522,7 +617,7 @@
       for (let x = 0; x < width; x++) {
         const index = y * width + x;
         const rgb = working[index].map((v) => clamp(v));
-        const color = nearestColor(rgb, colorObjects);
+        const color = nearestColor(rgb, colorObjects, mode === "mard");
         pattern[index] = color;
         if (useDither) {
           const error = rgb.map((v, i) => v - color.rgb[i]);
@@ -551,20 +646,19 @@
     return result;
   }
 
-  function rgbDistanceSquared(a, b) { return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2; }
   function paletteFrequencyOrder(pixels, palette) {
     const counts = new Array(palette.length).fill(0);
+    const totalDistance = new Array(palette.length).fill(0);
     const stride = Math.max(1, Math.ceil(pixels.length / 30000));
     for (let index = 0; index < pixels.length; index += stride) {
       const pixel = pixels[index];
-      let nearest = 0, distance = Infinity;
-      for (let colorIndex = 0; colorIndex < palette.length; colorIndex++) {
-        const nextDistance = rgbDistanceSquared(pixel, palette[colorIndex].rgb);
-        if (nextDistance < distance) { distance = nextDistance; nearest = colorIndex; }
-      }
-      counts[nearest]++;
+      const match = nearestMardMatch(pixel, palette);
+      counts[match.index]++;
+      totalDistance[match.index] += match.distance;
     }
-    return palette.map((color, index) => ({ color, count: counts[index] })).sort((a, b) => b.count - a.count);
+    return palette
+      .map((color, index) => ({ color, count: counts[index], meanDistance: counts[index] ? totalDistance[index] / counts[index] : Infinity }))
+      .sort((a, b) => b.count - a.count || a.meanDistance - b.meanDistance);
   }
 
   function histogramClusters(pixels, desiredCount) {
@@ -689,6 +783,15 @@
     };
   }
 
+  function cellCodeFontSize(label, cellSize) {
+    const textLength = Math.max(1, String(label).length);
+    const horizontalPadding = Math.max(2, cellSize * .15);
+    const availableWidth = Math.max(4, cellSize - horizontalPadding * 2);
+    const widthLimitedSize = availableWidth / (textLength * .58);
+    const preferredSize = cellSize * (textLength > 3 ? .3 : .42);
+    return Math.max(5, Math.min(14, preferredSize, widthLimitedSize));
+  }
+
   function drawPatternToCanvas(targetCanvas, cellSize, forceCodes = false) {
     const { width, height, pattern } = state;
     const layout = patternCanvasLayout(cellSize);
@@ -743,13 +846,13 @@
       if (cellSize >= 6) {
         const label = forceCodes || !els.showCodes || els.showCodes.checked ? color.id : symbolMap.get(color.id) || "·";
         const textColor = contrastText(color.rgb);
-        const fontSize = Math.max(6, Math.min(16, Math.round(cellSize * (label.length > 3 ? .35 : .5))));
+        const fontSize = cellCodeFontSize(label, cellSize);
         context.font = `700 ${fontSize}px Arial, "Microsoft YaHei", sans-serif`;
         context.textAlign = "center"; context.textBaseline = "middle";
         // A small opposite-color halo keeps codes readable on both dark and
         // light beads, including when a phone viewer scales the PNG down.
         context.strokeStyle = textColor === "#fffdf7" ? "rgba(0,0,0,.62)" : "rgba(255,255,255,.78)";
-        context.lineWidth = Math.max(1, fontSize * .14);
+        context.lineWidth = Math.max(.8, fontSize * .12);
         context.strokeText(label, px + cellSize / 2, py + cellSize / 2 + .5);
         context.fillStyle = textColor;
         context.fillText(label, px + cellSize / 2, py + cellSize / 2 + .5);
@@ -918,7 +1021,7 @@
         const color = state.pattern[row * state.width + column];
         if (!color) continue;
         const label = String(color.id || "?").slice(0, 8);
-        const size = Math.max(6, Math.min(12, cellSize * (label.length > 3 ? .35 : .48)));
+        const size = cellCodeFontSize(label, cellSize);
         const x = originX + column * cellSize + cellSize / 2 - label.length * size * .27;
         const top = originTop + row * cellSize + cellSize / 2 + size * .34;
         commands.push(pdfText(label, x, top, size, contrastRgb(color.rgb), pageHeight));

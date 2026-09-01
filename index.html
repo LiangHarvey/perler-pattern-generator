@@ -10,7 +10,7 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.4</span></p>
+        <p class="eyebrow">LOCAL · PERLER PATTERN TOOL · <span class="version-tag">v0.5.5</span></p>
         <h1>拼豆图纸生成器</h1>
       </div>
       <div class="top-actions">
@@ -66,7 +66,7 @@
           <p class="label-title">颜色模式 <span class="info-tip">决定输出什么颜色</span></p>
           <label class="radio-card selected"><input type="radio" name="colorMode" value="mard" checked /><span><strong>MARD 标准色卡</strong><small>内置 280 色 · 每格对应 MARD 色号</small></span></label>
           <label class="radio-card"><input type="radio" name="colorMode" value="original" /><span><strong>原图真实色</strong><small>预览 · 聚类色直接输出</small></span></label>
-          <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，不会调用档位外的颜色。</p>
+          <p class="hint palette-note">提取主色严格使用当前档位对应的 MARD 子集，并通过 CIEDE2000 感知色差精确匹配色号，不会调用档位外的颜色。</p>
           <button id="extractColors" class="button button-orange" type="button" disabled>开始提取主色</button>
           <details id="extractedResultDetails" class="result-disclosure" open>
             <summary><span class="disclosure-title">提取结果</span><span id="extractedResultSummary" class="disclosure-meta">上传图片后生成</span></summary>
